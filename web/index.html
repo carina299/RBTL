@@ -50,7 +50,7 @@
     --menu-wall-harbor: url("menu-harbor.webp");
     --menu-wall-default: var(--menu-wall-light);
     --avatar-default: url("avatar-sea.png");
-    /* ── PEARL TIDE · 珍珠潮汐(default) ── */
+    /* ── PEARL TIDE (default) ── */
     --bg: #F7FAFC;
     --header-bg: #F7FAFC;
     --hairline: rgba(120,142,165,.24);
@@ -84,7 +84,7 @@
     --motion-fast: 150ms;
     --motion-normal: 260ms;
     --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
-    /* composer 占据的底部区域(含安全区/键盘):scroll 底 padding 与边缘渐隐共用同一来源,保持对齐 */
+    /* the bottom area the composer occupies (incl. safe area / keyboard): scroll bottom padding and the edge fade share one source, so they stay aligned */
     --composer-zone: calc(var(--composer-h) + 16px + env(safe-area-inset-bottom) + var(--keyboard-offset));
     --edge-fade-top: clamp(24px, 5vw, 52px);
     --edge-fade-tail: clamp(16px, 3vw, 30px);
@@ -111,7 +111,7 @@
     --call-hangup-bg: #cf8d92;
     --call-hangup-shadow: rgba(176,96,104,.34);
   }
-  /* ── HARBOR · 海港(通用开源主题 / Tidal Echo) ── 中性冷调,供 fork 使用;只覆盖带色相变量,其余继承 PEARL TIDE */
+  /* ── HARBOR (generic open-source theme / Tidal Echo) ── neutral cool tone for forks; overrides only the hue variables, everything else inherits from PEARL TIDE */
   :root[data-theme="harbor"]{
       --wall-default: var(--wall-harbor);
       --menu-wall-default: var(--menu-wall-harbor);
@@ -439,7 +439,7 @@
     padding: clamp(14px, 2.4vw, 28px) var(--side-pad) var(--composer-zone);
     display: flex; flex-direction: column;
     transition: padding-bottom .28s cubic-bezier(.2,.8,.2,1);
-    /* 边缘渐隐:顶部一段、底部对齐 composer 上沿一段,消息滚到边缘自然淡出 */
+    /* edge fade: a band at the top and a band aligned to the composer's top edge, so messages fade out naturally as they scroll to the edge */
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-top), #000 calc(100% - var(--composer-zone)), transparent calc(100% - var(--composer-zone) + var(--edge-fade-tail)));
     mask-image: linear-gradient(to bottom, transparent 0, #000 var(--edge-fade-top), #000 calc(100% - var(--composer-zone)), transparent calc(100% - var(--composer-zone) + var(--edge-fade-tail)));
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
@@ -515,7 +515,7 @@
   .row[data-vkey] .bubble,
   .row[data-vkey] .think-block{ animation: none; }
   @keyframes pop{ from{ transform: translateY(5px) scale(.99);} to{ transform:none;} }
-  /* 新消息入场:轻微弹性,只对刚发/刚收到那条播一次(虚拟列表复用不重播,JS 控 enter class) */
+  /* new-message entrance: slight bounce, played once for the just-sent/just-received message only (virtual-list reuse doesn't replay it, JS controls the enter class) */
   .row[data-vkey].enter-human .bubble{ transform-origin: bottom right; animation: enterHuman .44s cubic-bezier(.34,1.46,.5,1) both; }
   .row[data-vkey].enter-ai .bubble{ transform-origin: bottom left; animation: enterAi .44s cubic-bezier(.34,1.46,.5,1) both; }
   @keyframes enterHuman{ from{ transform: translate(6px, 9px) scale(.95); opacity:0; } 55%{ opacity:1; } to{ transform:none; opacity:1; } }
@@ -532,7 +532,7 @@
     border: 0;
     box-shadow: 0 10px 28px rgba(78, 94, 108, 0.08);
   }
-  /* 每段最后一条:外下角收一个小尖 */
+  /* last message in a group: a small tail on the outer bottom corner */
   .row.ai.tail .bubble{ border-bottom-left-radius: 2px; }
   .row.human.tail .bubble{ border-bottom-right-radius: 2px; }
 
@@ -570,7 +570,7 @@
   .row.ai .meta{ color: var(--text-faint); }
   .row.human .meta .tick,
   .row.ai .meta .tick{ color: var(--tick); }
-  /* 发送中:小时钟,转完即送达 → 同位换成 ✓✓ */
+  /* sending: a small clock; once it finishes, delivered → replaced in place with ✓✓ */
   .meta .tick.clock{ color: var(--tick); }
   .meta .tick.clock svg{ width: 1.05em; height: 1.05em; vertical-align: -0.18em; }
 
@@ -718,7 +718,7 @@
   }
 
   /* ── act ── the AI's action chip: a quiet "what it just did", optionally expand to see raw tool calls ──
-     视觉与 thinking 同一族(--think-* 配色),但更小、更收,贴在头像缝隙里,不抢气泡 ── */
+     same visual family as thinking (--think-* colors), but smaller and tighter, tucked in the gap by the avatar, not competing with the bubble ── */
   .row.act{
     justify-content: flex-start;
     padding-left: calc(var(--avatar-size) + clamp(10px, 1.6vw, 16px));
@@ -747,12 +747,12 @@
   }
   .act-label{
     color: var(--think-label);
-    font-family: var(--font-cn);                /* 统一宋体:--font-en 末尾的通用 serif 会先吃掉 CJK→iOS 回退黑体 */
+    font-family: var(--font-cn);                /* force the serif CJK face: the generic serif at the end of --font-en would otherwise grab CJK first → iOS falls back to a sans face */
     font-size: clamp(12px, 1.32vw, 13.5px);
     line-height: 1.46;
     letter-spacing: .02em;
   }
-  /* 展开指示:沿用 thinking 的空心星 ✧(收起)→ 实心 ✦(展开),比"· 展开"文字更轻、不突兀 */
+  /* expand affordance: reuses thinking's hollow star ✧ (collapsed) → filled ✦ (expanded); lighter and less intrusive than a "· expand" label */
   .act-state{
     flex: none;
     color: var(--think-flourish);
@@ -820,7 +820,7 @@
     box-shadow: 0 16px 32px rgba(41, 60, 78, 0.22);
   }
   .floatbtn.send:hover{ color:#ffffff; }
-  .floatbtn.send:active{ transform: scale(.97); }      /* 发送键按压:轻收 3%(比通用 .floatbtn 的 .9 克制) */
+  .floatbtn.send:active{ transform: scale(.97); }      /* send-button press: shrink 3% (gentler than the generic .floatbtn's .9) */
   @keyframes send-go{ from{ transform: scale(.96); } to{ transform: scale(1); } }
   .floatbtn.send.send-go{ animation: send-go .22s cubic-bezier(.2,.8,.2,1); }
   @media (prefers-reduced-motion: reduce){ .floatbtn.send.send-go{ animation: none; } }
@@ -854,7 +854,7 @@
   .emojibtn:active{ transform: scale(.85); color: var(--text); }
   .emojibtn:hover{ color: var(--text); }
   .emojibtn svg{ width: clamp(22px, 3vw, 30px); height: clamp(22px, 3vw, 30px); display:block; }
-  /* ── 回到最新 · 翻历史时来新消息,底部悬浮一枚安静的半透明胶囊 ── */
+  /* ── back to latest · when a new message arrives while scrolled up in history, a quiet translucent pill floats at the bottom ── */
   .newmsg-pill{
     position: fixed; left: 50%; z-index: 90;
     bottom: calc(clamp(78px, 13vw, 96px) + env(safe-area-inset-bottom));
@@ -1179,7 +1179,7 @@
     .profile-scroll{ gap:22px; }
   }
 
-  /* ── Menu (hub / home page · 从聊天页左箭头进入) ── */
+  /* ── Menu (hub / home page · entered via the left arrow on the chat screen) ── */
   .menu-panel{
     position: fixed; inset: 0; z-index: 190;
     pointer-events: none;
@@ -1208,13 +1208,13 @@
   }
   .menu-scroll::-webkit-scrollbar{ width:0; height:0; }
 
-  /* header: 玻璃液态日夜 toggle(左) · PRIVATE SPACE(右) */
+  /* header: liquid-glass day/night toggle (left) · PRIVATE SPACE (right) */
   .menu-head{
     flex: 0 0 auto;
     display:flex; align-items:flex-start; justify-content:space-between;
     margin-bottom: clamp(34px, 10vw, 68px);
   }
-  /* (主题切换已移至设置页 #themeSeg;原菜单页玻璃 toggle 的 CSS 已随标记一并移除) */
+  /* (theme switching moved to the settings page #themeSeg; the CSS for the old menu-page glass toggle was removed along with its markup) */
   .menu-private{
     text-align:right; line-height:1.55;
     font-family: var(--font-en), var(--font-cn);
@@ -1294,7 +1294,7 @@
     letter-spacing:.05em; color: var(--text-faint);
   }
 
-  /* ── Voice call (speaking overlay · 假按键 / 纯 UI,后端以后接) ── */
+  /* ── Voice call (speaking overlay · placeholder buttons / UI only, backend wired later) ── */
   .call-overlay{
     position: fixed; inset: 0; z-index: 150;
     pointer-events: none;
@@ -1323,7 +1323,7 @@
   }
   .call-overlay.open .call-sheet{ opacity: 1; pointer-events: auto; transform: translateY(0); }
 
-  /* ── Avatar stage: 头像 + 两翼声纹 ── */
+  /* ── Avatar stage: avatar + voice-wave wings ── */
   .call-avatar-stage{
     display: flex; align-items: center; justify-content: center;
     width: 100%;
@@ -1409,11 +1409,11 @@
   /* ── Quote (the AI's last spoken line) ── */
   .call-quote{
     flex: 1 1 auto;
-    min-height: 0;                 /* 让 flex 能真正约束它,长文本不再撑破/盖住头像与字幕 */
+    min-height: 0;                 /* let flex actually constrain it, so long text no longer overflows / covers the avatar and captions */
     display: flex; align-items: center; justify-content: center;
     width: min(88vw, 400px);
     padding: clamp(8px, 2vw, 18px) clamp(8px, 2vw, 16px);
-    overflow: hidden;              /* 兜底:绝不溢出到相邻区域 */
+    overflow: hidden;              /* safety net: never overflow into adjacent areas */
   }
   .call-quote-mark{
     color: var(--text-faint);
@@ -1430,7 +1430,7 @@
     max-height: 100%;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-width: none;                 /* Firefox 隐藏滚动条 */
+    scrollbar-width: none;                 /* Firefox: hide scrollbar */
     color: var(--text);
     font-family: var(--font-cn);
     font-size: clamp(20px, 5.2vw, 27px);
@@ -1439,9 +1439,9 @@
     padding: 0 clamp(6px, 1.5vw, 12px);
     overflow-wrap: break-word;
   }
-  .call-quote-text::-webkit-scrollbar{ display: none; }   /* WebKit 隐藏滚动条 */
-  /* 仅当文字真的溢出时(由 JS 加 .clip)才底部渐隐(顶部保持清晰,因为总是从头读起,
-     渐隐只用来暗示"下面还有,全文在字幕条里") */
+  .call-quote-text::-webkit-scrollbar{ display: none; }   /* WebKit: hide scrollbar */
+  /* only fade the bottom when the text actually overflows (JS adds .clip); the top stays crisp since you always read from the start,
+     the fade just hints "there's more below, the full text is in the caption bar") */
   .call-quote-text.clip{
     -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 22px), transparent 100%);
             mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 22px), transparent 100%);
@@ -1490,7 +1490,7 @@
     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Cline x1='4' y1='9' x2='4' y2='15'/%3E%3Cline x1='9' y1='4.5' x2='9' y2='19.5'/%3E%3Cline x1='14' y1='7.5' x2='14' y2='16.5'/%3E%3Cline x1='19' y1='10.5' x2='19' y2='13.5'/%3E%3C/svg%3E") center/contain no-repeat;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round'%3E%3Cline x1='4' y1='9' x2='4' y2='15'/%3E%3Cline x1='9' y1='4.5' x2='9' y2='19.5'/%3E%3Cline x1='14' y1='7.5' x2='14' y2='16.5'/%3E%3Cline x1='19' y1='10.5' x2='19' y2='13.5'/%3E%3C/svg%3E") center/contain no-repeat;
   }
-  /* 「我在想 …」跳动点(引号区,贴心提示) */
+  /* "thinking …" bouncing dots (in the quote area, a gentle hint) */
   .call-dots{ display: inline-flex; align-items: center; gap: 4px; }
   .call-dots i{
     width: 4px; height: 4px; border-radius: 50%;
@@ -1518,7 +1518,7 @@
     line-height: 1.6;
     text-align: center;
     overflow-wrap: break-word;
-    max-height: clamp(72px, 16vh, 132px);   /* 长字幕也封顶,不再把控制键/挂断顶出屏外 */
+    max-height: clamp(72px, 16vh, 132px);   /* cap even long captions, so they no longer push the controls / hang-up button off-screen */
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
@@ -1648,14 +1648,14 @@
   .call-overlay.open.minimized .call-mini{ display: flex; }
   .call-overlay.open.minimized{ pointer-events: none; }
 
-  /* 来电:全屏(与通话中同一张画布,接听后无缝衔接,不再是顶部小卡片) */
+  /* incoming call: full screen (same canvas as an active call, seamless once answered — no longer a small card at the top) */
   .incoming-call-overlay{ z-index: 151; }
   .incoming-call-overlay .call-scrim{ background: var(--call-scrim); }
   .incoming-call-overlay .call-sheet{
     justify-content: flex-start;
     gap: clamp(12px, 2.6vw, 20px);
   }
-  /* caption 行(✦ incoming call ✦)——与 .call-status 同款横排 */
+  /* caption row (✦ incoming call ✦) — same horizontal layout as .call-status */
   .call-caption{
     display: inline-flex; align-items: center; gap: 11px;
     color: var(--think-label);
@@ -1666,7 +1666,7 @@
   }
   .call-caption .call-star{ color: var(--think-flourish); display: grid; place-items: center; }
   .call-caption .call-star svg{ width: 16px; height: 16px; display: block; }
-  /* 来电大头像 + 呼吸光环 */
+  /* incoming-call large avatar + breathing halo */
   .incoming-call-avatar{
     width: clamp(132px, 40vw, 184px); height: clamp(132px, 40vw, 184px);
     border-radius: 50%;
@@ -1682,7 +1682,7 @@
     100% { box-shadow: 0 12px 38px rgba(40,60,78,.18), 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent), inset 0 0 0 1px rgba(255,255,255,.14); }
   }
   @media (prefers-reduced-motion: reduce){ .incoming-call-avatar{ animation: none; } }
-  /* 来电动作区:推到底部,拒接/接听左右分开(iOS 式) */
+  /* incoming-call action area: pushed to the bottom, decline/answer split left and right (iOS style) */
   .incoming-call-actions{
     margin-top: auto;
     margin-bottom: calc(env(safe-area-inset-bottom) + clamp(14px, 5vh, 52px));
@@ -1740,10 +1740,10 @@
   .incoming-call-btn.decline svg{ transform: rotate(135deg); }
   .topbtn.call.active{ color: var(--accent); }
 
-  /* ── 长按气泡 · 复制菜单 (TG 式抬起+遮罩) ── */
-  /* 长按由我们接管 → 彻底屏蔽聊天区(#scroll)的系统选择/放大镜/callout,否则和我们的菜单打架。
-     用 !important 压过一切(含 iOS 误报 hover/pointer 的情况)。输入框在 #scroll 外,单独保持可选可编辑;
-     气泡里要复制文字走长按菜单的 Copy。 */
+  /* ── long-press a bubble · copy menu (Telegram-style lift + scrim) ── */
+  /* we take over long-press → fully suppress the chat area's (#scroll) native selection / loupe / callout, which would otherwise fight our menu.
+     !important overrides everything (including iOS's spurious hover/pointer states). The input is outside #scroll and stays selectable/editable on its own;
+     to copy text from a bubble, use Copy in the long-press menu. */
   #scroll, #scroll *{
     -webkit-user-select:none !important; user-select:none !important;
     -webkit-touch-callout:none !important;
@@ -1789,7 +1789,7 @@
   .msg-act:hover{ background:var(--row-press); }
   .msg-act:active{ background:var(--row-press); transform:scale(.98); }
   .msg-act svg{ width:18px; height:18px; opacity:.82; flex:0 0 auto; }
-  .msg-act.danger{ color:#e05a4d; }                       /* 删除(仅本地) */
+  .msg-act.danger{ color:#e05a4d; }                       /* delete (local only) */
 
   /* ── reaction chips (AI poke) ── */
   .row.has-reactions{ flex-direction:column; gap:5px; }
@@ -1818,7 +1818,7 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
-    /* 通话声纹是"对方正在说话"的功能性反馈,即便系统减弱动态也保留(细窄低位移,不刺激) */
+    /* the call voice-wave is functional feedback that "the other side is speaking", kept even under reduce-motion (thin, narrow, low displacement — not jarring) */
     .call-wave i{
       animation: callWave var(--dur, 1s) var(--ease-soft) var(--d, 0s) infinite alternate !important;
     }
@@ -1951,7 +1951,7 @@
         </div>
       </div>
 
-      <!-- 主题切换 -->
+      <!-- theme switch -->
       <section class="settings-card">
         <div class="settings-label">主题</div>
         <div class="segmented" id="themeSeg" role="group" aria-label="主题切换">
@@ -1960,7 +1960,7 @@
         </div>
       </section>
 
-      <!-- 锁屏通知 -->
+      <!-- lock-screen notifications -->
       <section class="settings-card">
         <div class="settings-label">锁屏通知 <i class="info-i" title="Claude发消息、而你没在看时，推送到手机锁屏">i</i></div>
         <div class="segmented" id="pushSeg" role="group" aria-label="锁屏通知开关">
@@ -1980,7 +1980,7 @@
         <div class="push-hint" id="brainHint"></div>
       </section>
 
-      <!-- 模型选择（占位 · 假按键，以后接真切换）-->
+      <!-- model picker (placeholder · fake buttons, real switching wired later) -->
       <section class="settings-card">
         <div class="settings-label">模型选择</div>
         <div class="segmented" id="modelSeg" role="group" aria-label="模型选择">
@@ -1991,7 +1991,7 @@
         </div>
       </section>
 
-      <!-- effort（占位 · 假按键）-->
+      <!-- effort (placeholder · fake buttons) -->
       <section class="settings-card">
         <div class="settings-label">effort <i class="info-i" title="推理强度：越高越细，耗时越长">i</i></div>
         <div class="segmented" id="effortSeg" role="group" aria-label="effort">
@@ -2003,7 +2003,7 @@
         </div>
       </section>
 
-      <!-- 上下文阈值（占位 · 假按键）-->
+      <!-- context threshold (placeholder · fake buttons) -->
       <section class="settings-card">
         <div class="settings-label">上下文阈值 <i class="info-i" title="上下文阈值：保留多少 / 满多少触发">i</i></div>
         <div class="context-slider-wrap">
@@ -2012,7 +2012,7 @@
         </div>
       </section>
 
-      <!-- reset（占位 · 假按键）-->
+      <!-- reset (placeholder · fake buttons) -->
       <button class="action-row" id="resetRow" type="button">
         <span class="action-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/></svg></span>
         <span class="action-name">reset</span>
@@ -2020,7 +2020,7 @@
         <span class="action-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
       </button>
 
-      <!-- swap（占位 · 假按键）-->
+      <!-- swap (placeholder · fake buttons) -->
       <button class="action-row" id="swapRow" type="button">
         <span class="action-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h13a4 4 0 0 1 4 4"/><path d="m17 20 4-4-4-4"/><path d="M21 16H8a4 4 0 0 1-4-4"/></svg></span>
         <span class="action-name">swap</span>
@@ -2053,7 +2053,7 @@
   </div>
 </div>
 
-<!-- ── Menu (hub / 主菜单页 · 聊天页左箭头进入) ── -->
+<!-- ── Menu (hub / home page · entered via the left arrow on the chat screen) ── -->
 <div class="menu-panel hidden" id="menuPanel" role="dialog" aria-modal="true" aria-label="主菜单">
   <div class="menu-page">
     <div class="menu-scroll">
@@ -2116,7 +2116,7 @@
   </div>
 </div>
 
-<!-- ── Voice call (speaking overlay · 假按键,纯 UI) ── -->
+<!-- ── Voice call (speaking overlay · placeholder buttons, UI only) ── -->
 <div class="call-overlay hidden" id="callOverlay" aria-hidden="true">
   <div class="call-mini" id="callMini">
     <span class="call-mini-dot"></span>
@@ -2202,10 +2202,10 @@
   </div>
 </div>
 
-<!-- ── 长按气泡 · 复制菜单 (clone 抬起 + 遮罩 + 动作条) ── -->
+<!-- ── long-press a bubble · copy menu (clone lift + scrim + action bar) ── -->
 <div class="msg-menu" id="msgMenu" aria-hidden="true">
   <div class="msg-menu-scrim" id="msgMenuScrim"></div>
-  <!-- 抬起的气泡克隆由 JS 插在这里 -->
+  <!-- the lifted bubble clone is inserted here by JS -->
   <div class="msg-menu-actions" id="msgMenuActions" role="menu" aria-label="消息操作">
     <button class="msg-act" type="button" data-act="copy" role="menuitem">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
@@ -2235,15 +2235,15 @@ const CONFIG = {
 };
 const AI_NAME = CONFIG.AI_NAME, HUMAN_NAME = CONFIG.HUMAN_NAME, APP_NAME = CONFIG.APP_NAME;
 
-const API_BASE = "/relay";       // same-origin; nginx mounts the relay here (RELAY_PUBLIC_PREFIX)
+const API_BASE = "http://127.0.0.1:3011";       // same-origin; nginx mounts the relay here (RELAY_PUBLIC_PREFIX)
 const USE_MOCK  = false;          // true = self-contained demo with fake data (no backend needed)
 const LS_KEY    = "companion_secret";
 
-/* ── 状态 ── */
+/* ── state ── */
 let secret  = localStorage.getItem(LS_KEY);
 let lastId  = 0;
 const seen  = new Set();
-let es      = null;     // EventSource(或 MockEventSource)
+let es      = null;     // EventSource (or MockEventSource)
 let connected = false;
 let healthTimer = null;
 let streamWatchTimer = null;
@@ -2255,7 +2255,7 @@ const BACKFILL_MS = 20000;
 const STREAM_FLUSH_MS = 80;
 let typingTimer = null;
 let typingActive = false;
-const freshKeys = new Set();   // 刚发/刚收到、待播一次入场动画的消息 key
+const freshKeys = new Set();   // keys of just-sent/just-received messages awaiting a one-time entrance animation
 const freshReactionKeys = new Set();   // messages whose AI reaction just arrived, pending a one-shot pop
 const streamDrafts = new Map();        // stream_id+kind -> temporary bubble key
 const streamDeltaBuffers = new Map();  // stream_id+kind -> batched delta
@@ -2274,7 +2274,7 @@ const scrollEl = $("#scroll"), emptyEl = $("#empty");
 const statusEl = $("#status"), inputEl = $("#input"), sendBtn = $("#sendBtn"), newMsgBtn = $("#newMsgBtn");
 const micBtn = $("#micBtn"), clipBtn = $("#clipBtn"), avatarBtn = $("#avatarBtn");
 const clipInput = $("#clipInput");
-const localPreview = new Map();   // serverUrl -> blob: 本地预览，避免上传后重新下载闪烁
+const localPreview = new Map();   // serverUrl -> blob: local preview, avoids a re-download flicker after upload
 const avatarInput = $("#avatarInput"), wallEl = $("#wall");
 const peerNameEl = $("#peerName"), profilePanel = $("#profilePanel");
 const profileClose = $("#profileClose"), moreBtn = $("#moreBtn");
@@ -2287,7 +2287,7 @@ const sessionBtn = $("#sessionBtn"), sessionPop = $("#sessionPop"), sessionList 
 const terminalBtn = $("#terminalBtn"), terminalPanel = $("#terminalPanel"), terminalBack = $("#terminalBack"), terminalLog = $("#terminalLog"), terminalForm = $("#terminalForm"), terminalInput = $("#terminalInput"), terminalSession = $("#terminalSession");
 const brainSeg = $("#brainSeg"), brainHint = $("#brainHint");
 
-/* ════════ 固定聊天背景 + 本地头像 ════════ */
+/* ════════ fixed chat background + local avatar ════════ */
 const THEMES = ["light","harbor"];
 const WALLS = { light: "chat-light.webp", harbor: "chat-harbor.webp" };
 const AVATAR_KEY = "companion_avatar";
@@ -2343,7 +2343,7 @@ function applyWall(url){
   img.src = url;
 }
 function applyAvatar(url){
-  // 写 CSS 变量 → 顶栏头像、聊天每条消息旁的头像、空状态/登录 orb、profile 大头像一起换
+  // set CSS variables → header avatar, per-message avatars, empty-state / login orb, and the large profile avatar all change together
   const val = url ? `url("${url}")` : 'url("avatar-sea.png")';
   document.documentElement.style.setProperty("--avatar-default", val);
 }
@@ -2393,7 +2393,7 @@ applyIdentity();
 applyWall(currentWall());
 applyAvatar(localStorage.getItem(AVATAR_KEY));
 applyRemark(localStorage.getItem(REMARK_KEY));
-/* 主题只由日夜 toggle 控制(持久化),不再实时跟随系统;首次打开的初始值由 <head> 早期脚本取一次系统值 */
+/* theme is controlled only by the day/night toggle (persisted), no longer following the system live; the first-open initial value is read once from the system by the early <head> script */
 if (avatarBtn) avatarBtn.addEventListener("click", openProfile);
 if (moreBtn) moreBtn.addEventListener("click", openProfile);
 if (profileAvatarBtn) profileAvatarBtn.addEventListener("click", () => avatarInput && avatarInput.click());
@@ -2450,7 +2450,7 @@ document.addEventListener("keydown", (e) => {
 });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshDays(); });
 
-/* 设置页 #themeSeg 分段控件 — 手动切 5 套主题,持久化,联动壁纸/theme-color */
+/* settings-page #themeSeg segmented control — manually switch between 5 themes, persisted, syncing the wallpaper / theme-color */
 const THEME_KEY = "companion_theme";
 const themeSeg = $("#themeSeg");
 function syncThemeSeg(){
@@ -2473,7 +2473,7 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
   if (btn) setTheme(btn.dataset.val);
 });
 
-/* 本地预览便捷:仅 localhost 下,带 #preview-menu 直接亮出 hub 菜单(线上域名不生效,安全) */
+/* local-preview convenience: on localhost only, #preview-menu opens the hub menu directly (no effect on a live domain — safe) */
 (function(){
   var isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(location.hostname);
   function maybePreview(){
@@ -2513,7 +2513,7 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
   const callPrivateBtn = $("#callPrivateBtn");
   const callSpeakerBtn = $("#callSpeakerBtn");
 
-  const VU_BARS = 16;   // 每侧声纹竖条数
+  const VU_BARS = 16;   // number of voice-wave bars per side
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   let open = false;
@@ -2541,8 +2541,8 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
       host.textContent = "";
       const frag = document.createDocumentFragment();
       for (let i = 0; i < VU_BARS; i++){
-        const t = i / (VU_BARS - 1);                  // 0 = 贴头像(内) → 1 = 最外
-        const fade = Math.pow(1 - t, 0.9);            // 内高外低 + 向外淡出
+        const t = i / (VU_BARS - 1);                  // 0 = next to the avatar (inner) → 1 = outermost
+        const fade = Math.pow(1 - t, 0.9);            // taller inside, shorter outside + fading outward
         const ripple = 0.5 + 0.5 * Math.sin(i * 1.9 + side * 1.1);
         const bar = Math.max(0.12, fade * (0.42 + 0.58 * ripple));
         const el = document.createElement("i");
@@ -2601,13 +2601,13 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
     callQuoteText.scrollTop = 0;
   }
   function peerTyping(active){
-    if (!open || speakBusy) return;        // 已经在说了就不退回"在想"
+    if (!open || speakBusy) return;        // already speaking, so don't fall back to "thinking"
     if (active){
       setCaption("thinking");
-      setQuote(HINT_THINKING, { hint: true, dots: true });   // 「我在想 …」← 收到=已送达的贴心回执
+      setQuote(HINT_THINKING, { hint: true, dots: true });   // "thinking …" ← received = a gentle delivered receipt
     } else {
       setCaption("listening");
-      setQuote(HINT_LISTENING, { hint: true });              // 「我在听,你慢慢说」
+      setQuote(HINT_LISTENING, { hint: true });              // "I'm listening, take your time"
     }
   }
 
@@ -2913,7 +2913,7 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
     callBtn.classList.add("active");
-    // 双 rAF:从离屏态滑入
+    // double rAF: slide in from the off-screen state
     requestAnimationFrame(() => requestAnimationFrame(() => overlay.classList.add("open")));
     secs = 0; timerEl.textContent = fmt(secs);
     minimized = false;
@@ -3075,7 +3075,7 @@ if (themeSeg) themeSeg.addEventListener("click", e => {
   });
 })();
 
-/* ── 备注：点铅笔就地改名（同步顶栏名 + profile 名，存本机）── */
+/* ── remark name: tap the pencil to rename in place (syncs the header name + profile name, stored locally) ── */
 let nameEditing = false;
 function startNameEdit(){
   if (!profileNameInput || !profileNameEl || nameEditing) return;
@@ -3126,12 +3126,12 @@ if (avatarInput) avatarInput.addEventListener("change", () => {
   avatarInput.value = "";
 });
 
-/* ════════ Profile 设置控件 ════════ */
+/* ════════ profile settings controls ════════ */
 let toastEl = null, toastTimer = null;
 function showToast(msg){
   if (!toastEl){ toastEl = document.createElement("div"); toastEl.className = "toast"; document.body.appendChild(toastEl); }
   toastEl.textContent = msg;
-  void toastEl.offsetWidth;                       // reflow，确保过渡触发
+  void toastEl.offsetWidth;                       // reflow, ensures the transition fires
   toastEl.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
@@ -3287,7 +3287,7 @@ if (statusCopy) statusCopy.addEventListener("click", async () => {
   }catch(_){ showToast("复制失败"); }
 });
 
-/* ════════════ Mock 层(USE_MOCK=true 时启用)════════════ */
+/* ════════════ Mock layer (enabled when USE_MOCK=true) ════════════ */
 const Mock = (() => {
   const now = Date.now();
   const iso = (msAgo) => new Date(now - msAgo).toISOString();
@@ -3351,7 +3351,7 @@ const Mock = (() => {
     send: (text) => {
       const m = { id: nextId++, ts: new Date().toISOString(), from:"human", kind:"user", text, meta:{} };
       messages.push(m);
-      setTimeout(() => emit(m), 350);                 // 回显(测去重)
+      setTimeout(() => emit(m), 350);                 // echo back (tests dedup)
       if (Math.random() < 0.85){
         setTimeout(() => {
           const r = { id: nextId++, ts: new Date().toISOString(), from:"ai", kind:"reply",
@@ -3373,7 +3373,7 @@ class MockEventSource{
   close(){ this.readyState=2; Mock.unsubscribe(this); }
 }
 
-/* ════════════ API 层 ════════════ */
+/* ════════════ API layer ════════════ */
 function authHeaders(){ return { "Authorization": "Bearer " + secret }; }
 
 function activeSessionObj(){

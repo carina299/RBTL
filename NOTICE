@@ -16,3 +16,16 @@ it does not rewrite the license text that accompanied historical revisions.
 
 Copyright and attribution notices belonging to third-party material, if any,
 remain applicable to that material.
+
+---
+
+Fork/derivative notice
+-----------------------
+
+Copyright (C) 2026 [carina299] and [czhang11zhangyingmeng]
+
+This repository is a derivative work based on Companion Channel / Tidal Echo
+(https://github.com/anhe2021212-spec/Tidal_Echo), licensed under the GNU
+Affero General Public License v3.0. Modifications made from 2026-09-03
+onward — database migration to PostgreSQL, long-term memory system, and
+album feature completion — are also licensed under AGPLv3.

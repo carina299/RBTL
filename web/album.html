@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>相册 · Album Archive</title>
+<title>Album Archive</title>
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5/400.min.css" rel="stylesheet">
@@ -66,12 +66,12 @@ img{ display:block; max-width:100%; }
 button{ font:inherit; color:inherit; cursor:pointer; border:none; background:none; }
 .hidden{ display:none !important; }
 
-/* 主页同款毛玻璃柔光质感 */
+/* same frosted-glass soft-light texture as the home page */
 .glass{ background:var(--field-bg); border:1px solid var(--field-line);
   box-shadow:var(--soft-shadow), inset 0 1px 0 var(--sheet-hi);
   -webkit-backdrop-filter:blur(16px) saturate(1.25); backdrop-filter:blur(16px) saturate(1.25); }
 
-/* ───────── 顶栏：‹ 返回 + 右上 PHOTO ALBUM ───────── */
+/* ───────── top bar: ‹ back + PHOTO ALBUM at top-right ───────── */
 .bar{
   position:sticky; top:0; z-index:30; display:flex; align-items:flex-start; gap:6px;
   padding:calc(8px + env(safe-area-inset-top)) clamp(16px,5vw,28px) 4px;
@@ -89,14 +89,14 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 
 .wrap{ max-width:560px; margin:0 auto; padding:0 clamp(16px,5vw,28px) calc(22px + env(safe-area-inset-bottom)); position:relative; z-index:1; }
 
-/* ───────── Hero 抬头（左对齐、紧凑） ───────── */
+/* ───────── hero heading (left-aligned, compact) ───────── */
 .hero{ text-align:left; padding:2px 0 6px; }
 .hero h1{ font-family:var(--font-script); font-weight:400; color:var(--text);
   font-size:clamp(33px,10.6vw,46px); line-height:1; margin:0; }
 .hero .sub{ font-family:var(--font-en); font-style:italic; font-size:clamp(13px,3.8vw,16px);
   color:var(--text-soft); margin-top:0; letter-spacing:.01em; }
 
-/* ───────── 搜索 + Upload（窄小、浅色毛玻璃） ───────── */
+/* ───────── search + Upload (slim, light frosted glass) ───────── */
 .tools{ display:flex; gap:9px; align-items:stretch; margin:9px 0 13px; }
 .search{ flex:1; min-width:0; display:flex; align-items:center; gap:8px; padding:0 13px; border-radius:24px; }
 .search svg{ width:15px; height:15px; color:var(--text-faint); flex:0 0 auto; }
@@ -108,13 +108,13 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .up-btn:active{ transform:scale(.96); }
 .up-btn svg{ width:14px; height:14px; color:var(--text-soft); }
 
-/* 区块小标题 */
+/* section sub-heading */
 .sec-head{ display:flex; align-items:baseline; justify-content:space-between; margin:13px 2px 8px; }
 .sec-head h2{ font-family:var(--font-en); font-weight:500; font-size:17px; letter-spacing:.01em; margin:0; color:var(--text); }
 .sec-head .more{ font-family:var(--font-en); font-size:12.5px; font-style:italic; color:var(--text-soft); white-space:nowrap; }
 .sec-head .more:active{ opacity:.6; }
 
-/* ───────── board 照片墙：照片在底层，PNG 当上层压边（不露白边） ───────── */
+/* ───────── board photo wall: photos on the bottom layer, the PNG on top clips the edges (no white borders) ───────── */
 .board-zone{ position:relative; margin:0 -2px 2px; }
 .board{ position:relative; width:100%; aspect-ratio:1046/917; }
 .board-bg{ position:absolute; inset:0; width:100%; height:100%; object-fit:contain; z-index:2; pointer-events:none; }
@@ -123,7 +123,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .pw-draw{ position:absolute; left:1%; top:46.5%; width:32%; height:49%; z-index:3; border-radius:8px; transition:background .2s; }
 .pw-draw:active{ background:rgba(120,142,165,.14); }
 
-/* ───────── Recent Uploads：横排小正方圆角图 ───────── */
+/* ───────── Recent Uploads: a horizontal row of small rounded squares ───────── */
 .rail{ display:flex; gap:9px; overflow-x:auto; padding:2px 2px 3px; margin:0 -2px;
   scrollbar-width:none; scroll-snap-type:x proximity; }
 .rail::-webkit-scrollbar{ display:none; }
@@ -135,7 +135,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .dot{ width:5px; height:5px; border-radius:50%; background:var(--hairline); transition:background .25s,width .25s; }
 .dot.on{ background:var(--accent); width:14px; border-radius:3px; }
 
-/* ───────── My Albums：横向圆角卡 ───────── */
+/* ───────── My Albums: horizontal rounded cards ───────── */
 .albums{ display:flex; gap:10px; overflow-x:auto; padding:2px 2px 4px; margin:0 -2px; scrollbar-width:none; scroll-snap-type:x proximity; }
 .albums::-webkit-scrollbar{ display:none; }
 .album{ flex:0 0 auto; display:flex; align-items:center; gap:10px; width:186px; padding:8px; border-radius:16px;
@@ -148,7 +148,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .album .txt span{ font-family:var(--font-en); font-size:12.5px; letter-spacing:.03em; color:var(--text-faint); }
 
-/* ───────── 全部 / 搜索结果：圆角无边框网格 ───────── */
+/* ───────── all photos / search results: rounded borderless grid ───────── */
 .rgrid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px 14px; padding:4px 2px 0; }
 .rcard{ text-align:left; transition:transform .2s; animation:popIn .5s both; }
 .rcard:active{ transform:scale(.97); }
@@ -158,13 +158,13 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .rcard .meta{ font-family:var(--font-en); font-size:11.5px; letter-spacing:.03em; color:var(--text-faint); margin:0 3px;
   display:flex; gap:8px; }
 
-/* 空态 / 加载 */
+/* empty state / loading */
 .empty{ text-align:center; color:var(--text-soft); padding:34px 20px; }
 .empty .en{ font-family:var(--font-en); font-style:italic; font-size:18px; color:var(--text-faint); }
 .empty p{ font-family:var(--font-cn); font-size:13.5px; margin:8px 0 0; }
 .msg{ color:var(--danger); text-align:center; padding:14px; font-size:13.5px; }
 
-/* ───────── 详情（字号偏小、留白呼吸） ───────── */
+/* ───────── detail view (smaller type, breathing whitespace) ───────── */
 .detail{ padding-top:4px; }
 .detail .photo{ width:100%; max-height:54vh; object-fit:cover; border-radius:18px; background:var(--hairline); box-shadow:var(--photo-shadow); cursor:zoom-in; }
 .detail .author{ display:flex; align-items:center; gap:10px; margin:16px 2px 0; }
@@ -196,12 +196,12 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .act button svg{ width:15px; height:15px; color:var(--text-soft); }
 .act button:active{ transform:scale(.96); }
 
-/* 详情花体落款（列表页不放，保持一屏） */
+/* detail-view script signature (not on the list page, to keep it to one screen) */
 .footer{ text-align:center; padding:38px 0 8px; }
 .footer h3{ font-family:var(--font-script); font-weight:400; font-size:32px; color:var(--text); margin:0; line-height:1; }
 .footer p{ font-family:var(--font-en); font-style:italic; font-size:13.5px; color:var(--text-faint); margin:9px 0 0; letter-spacing:.04em; }
 
-/* ───────── 上传：主页上的悬浮 modal ───────── */
+/* ───────── upload: floating modal over the home page ───────── */
 .modal{ position:fixed; inset:0; z-index:70; display:grid; place-items:center; padding:18px;
   background:var(--sheet-scrim); -webkit-backdrop-filter:blur(7px); backdrop-filter:blur(7px); animation:fade .25s; }
 .sheet{ position:relative; width:100%; max-width:430px; max-height:88vh; overflow-y:auto; border-radius:24px; padding:24px 20px 22px;
@@ -230,7 +230,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 .sheet .row .send{ background:var(--accent-deep); color:#fff; box-shadow:var(--soft-shadow); }
 .sheet .status{ margin-top:12px; font-family:var(--font-cn); font-size:12.5px; color:var(--text-soft); text-align:center; min-height:1.1em; }
 
-/* gate 门 */
+/* key gate */
 .gatebox{ background:var(--sheet-bg); border:1px solid var(--sheet-line); border-radius:22px; padding:22px 20px;
   box-shadow:var(--shadow), inset 0 1px 0 var(--sheet-hi); -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px); margin-top:8px; }
 .gatebox p{ font-family:var(--font-cn); font-size:13px; color:var(--text-soft); text-align:center; margin:0 0 14px; line-height:1.6; }
@@ -247,7 +247,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
   -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); display:grid; place-items:center; padding:24px; animation:fade .25s; }
 .lightbox img{ max-width:100%; max-height:90vh; border-radius:10px; box-shadow:0 30px 80px rgba(0,0,0,.5); }
 
-/* 动画 */
+/* animations */
 @keyframes popIn{ from{ opacity:0; transform:translateY(10px) scale(.97);} }
 @keyframes fade{ from{ opacity:0;} }
 @keyframes sheetIn{ from{ opacity:0; transform:translateY(20px) scale(.97);} }
@@ -264,16 +264,16 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 <body>
 <div class="wall"></div>
 
-<!-- 顶栏 -->
+<!-- top bar -->
 <div class="bar">
-  <button class="icon" id="topBack" title="返回">
+  <button class="icon" id="topBack" title="Back">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
   </button>
   <span class="grow"></span>
   <div class="top-label" id="topLabel">PHOTO<br>ALBUM<span class="rule"></span></div>
 </div>
 
-<!-- ════════ 列表 ════════ -->
+<!-- ════════ list ════════ -->
 <div class="wrap" id="listView">
   <div class="hero">
     <h1>Album Archive</h1>
@@ -291,11 +291,11 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
     </button>
   </div>
 
-  <!-- board 照片墙：照片在底层，al-board.png 当上层压边 -->
+  <!-- board photo wall: photos on the bottom layer, al-board.png on top clips the edges -->
   <div class="board-zone" id="boardZone">
     <div class="board" id="board">
       <img class="board-bg" src="al-board.png" alt="" draggable="false">
-      <button class="pw-draw" id="drawBtn" title="随机抽一张"></button>
+      <button class="pw-draw" id="drawBtn" title="Draw a random one"></button>
     </div>
   </div>
 
@@ -312,7 +312,7 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
     <div class="albums" id="albums"></div>
   </div>
 
-  <!-- 全部 / 搜索结果 -->
+  <!-- all photos / search results -->
   <div id="gridSec" class="hidden">
     <div class="sec-head"><h2 id="gridHead">All Photos</h2><button class="more" id="gridBack">‹ back</button></div>
     <div class="rgrid" id="grid"></div>
@@ -320,12 +320,12 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 
   <div class="empty hidden" id="listEmpty">
     <div class="en">the album is still empty</div>
-    <p>点「Upload Photo」，放第一张进来。</p>
+    <p>Tap "Upload Photo" to add the first one.</p>
   </div>
   <div class="msg hidden" id="listMsg"></div>
 </div>
 
-<!-- ════════ 详情 ════════ -->
+<!-- ════════ detail ════════ -->
 <div class="wrap detail hidden" id="detailView">
   <img class="photo" id="detailImg" alt="">
   <div class="author">
@@ -337,18 +337,18 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
   <div class="views" id="detailViews"></div>
 
   <div class="notes">
-    <div class="nh" id="notesTitle">Claude的评语</div>
+    <div class="nh" id="notesTitle">Notes from Claude</div>
     <div id="notesBox"></div>
   </div>
 
   <div class="act">
     <button class="glass" id="actZoom">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4M11 8v6M8 11h6"/></svg>
-      查看大图
+      View full image
     </button>
     <button class="glass" id="actRand">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
-      随机抽取
+      Shuffle
     </button>
   </div>
 
@@ -358,37 +358,37 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
   </div>
 </div>
 
-<!-- ════════ token 门 ════════ -->
+<!-- ════════ token gate ════════ -->
 <div class="wrap gate hidden" id="gateView">
   <div class="hero" style="padding-top:40px"><h1>Album Archive</h1><div class="sub">a private little gallery</div></div>
   <div class="gatebox">
-    <p>没读到访问密钥——先在主页登录，或在此粘贴密钥（与 PWA 同一个）。</p>
-    <input type="text" id="gateInput" placeholder="访问密钥">
+    <p>No access key found — sign in on the home page first, or paste your key here (the same one the PWA uses).</p>
+    <input type="text" id="gateInput" placeholder="Access key">
     <div class="row">
-      <button class="ghost" id="gateHome">去主页</button>
-      <button class="send" id="gateSave">保存并进入</button>
+      <button class="ghost" id="gateHome">Home page</button>
+      <button class="send" id="gateSave">Save and enter</button>
     </div>
   </div>
 </div>
 
-<!-- ════════ 上传悬浮窗（叠在主页上） ════════ -->
+<!-- ════════ upload modal (layered over the home page) ════════ -->
 <div class="modal hidden" id="uploadModal">
   <div class="sheet" id="uploadSheet">
-    <button class="sheet-x" id="uploadClose" aria-label="关闭">✕</button>
-    <div class="fh">收一张进相册</div>
+    <button class="sheet-x" id="uploadClose" aria-label="Close">✕</button>
+    <div class="fh">Add one to the album</div>
     <div class="fsub">a memory for the archive</div>
-    <label>选一张照片（手机可直接拍 / 从相册选）</label>
+    <label>Pick a photo (take one, or choose from your library)</label>
     <input type="file" id="fileInput" accept="image/*">
-    <img class="preview hidden" id="preview" alt="预览">
-    <label>说明（留空就用文件名）</label>
-    <input type="text" id="capInput" placeholder="这张是…">
-    <label>时间（可空，如 2026-06-25）</label>
+    <img class="preview hidden" id="preview" alt="Preview">
+    <label>Caption (leave blank to use the filename)</label>
+    <input type="text" id="capInput" placeholder="This one is…">
+    <label>Date (optional, e.g. 2026-06-25)</label>
     <input type="text" id="timeInput" placeholder="2026-06-25" inputmode="numeric">
-    <label>分组（可空，如 出游 / 日常）</label>
-    <input type="text" id="groupInput" placeholder="出游 / 日常 …">
+    <label>Group (optional, e.g. Trips / Everyday)</label>
+    <input type="text" id="groupInput" placeholder="Trips / Everyday …">
     <div class="row">
-      <button class="ghost" id="uploadCancel">取消</button>
-      <button class="send" id="uploadSend">上传到相册</button>
+      <button class="ghost" id="uploadCancel">Cancel</button>
+      <button class="send" id="uploadSend">Upload to album</button>
     </div>
     <div class="status" id="uploadStatus"></div>
   </div>
@@ -416,7 +416,7 @@ const AI_NAME="Claude";  // keep in sync with the PWA's CONFIG.AI_NAME
 const peerName=(localStorage.getItem("companion_profile_remark")||"").trim()||AI_NAME;
 document.documentElement.style.setProperty("--peer-avatar", peerAvatar?`url("${peerAvatar}")`:'url("avatar-sea.png")');
 
-/* board 8 个相框：相对 al-board.png(1046×917) 的孔洞包围盒百分比（无需旋转，照片在底层被 PNG 压边） */
+/* board's 8 frames: bounding-box percentages of the holes relative to al-board.png (1046×917) — no rotation needed, photos sit under the PNG which clips their edges */
 const FRAMES=[
   {l:33.75,t:1.74,w:29.45,h:28.14},
   {l:66.44,t:6.00,w:27.15,h:23.88},
@@ -460,7 +460,7 @@ async function api(path,opts){
   return r;
 }
 
-/* ── 列表 ── */
+/* ── list ── */
 async function loadList(){
   show("list");
   $("listMsg").classList.add("hidden");
@@ -477,17 +477,17 @@ async function loadList(){
     renderRecent();
     renderAlbums();
   }catch(e){
-    if(e.message!=="401"){ $("listMsg").textContent="加载失败："+e.message; $("listMsg").classList.remove("hidden"); }
+    if(e.message!=="401"){ $("listMsg").textContent="Failed to load: "+e.message; $("listMsg").classList.remove("hidden"); }
   }
 }
 
-/* board 照片墙：照片插到底层（z1），al-board.png(z2) 压住边，孔洞露出照片，不露白边 */
+/* board photo wall: photos go on the bottom layer (z1), al-board.png (z2) covers the edges, the holes reveal the photos, no white borders */
 function renderBoard(){
   const board=$("board");
   board.querySelectorAll(".pw-frame").forEach(n=>n.remove());
   const recent=ALL.slice(0, FRAMES.length);
   FRAMES.forEach((f,i)=>{
-    const p=recent[i]; if(!p) return;          // 空框跳过，露出 PNG 透明孔洞
+    const p=recent[i]; if(!p) return;          // skip empty frames, leaving the PNG's transparent hole
     const el=document.createElement("button"); el.className="pw-frame";
     el.style.cssText=`left:${f.l}%;top:${f.t}%;width:${f.w}%;height:${f.h}%;animation-delay:${i*55}ms`;
     el.innerHTML=`<img loading="lazy" src="${imgUrl(p)}" alt="">`;
@@ -496,7 +496,7 @@ function renderBoard(){
   });
 }
 
-/* Recent Uploads：横排小正方圆角图（最新 12） */
+/* Recent Uploads: a horizontal row of small rounded squares (latest 12) */
 function renderRecent(){
   const box=$("recent"); box.innerHTML="";
   const recent=ALL.slice(0,12);
@@ -532,7 +532,7 @@ function renderAlbums(){
   }
 }
 
-/* 全部 / 搜索 / 分组 → 圆角网格 */
+/* all / search / group → rounded grid */
 function enterGrid(opt){
   filterGroup=opt.group||""; if(opt.text!==undefined) filterText=opt.text;
   if(opt.group) trace("album",{name:opt.group}); else if(opt.text) trace("search",{q:opt.text});
@@ -557,49 +557,49 @@ function renderGrid(){
   if(filterText){ const q=filterText.toLowerCase();
     items=items.filter(p=>((p.caption||"")+" "+(p.group||"")+" "+(p.time||"")).toLowerCase().includes(q)); }
   grid.innerHTML="";
-  if(!items.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="en">nothing here</div><p>换个词，或返回看看。</p></div>`; return; }
+  if(!items.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="en">nothing here</div><p>Try another word, or go back.</p></div>`; return; }
   items.forEach((p,i)=>{
     const card=document.createElement("button"); card.className="rcard"; card.style.animationDelay=(i*35)+"ms";
     const meta=[]; meta.push(p.views>0?`seen ${p.views}`:"unseen"); if(p.time) meta.push(esc(p.time));
     card.innerHTML=`<img class="img" loading="lazy" src="${imgUrl(p)}" alt="">
-      <div class="cap">${esc(p.caption||"（无说明）")}</div>
+      <div class="cap">${esc(p.caption||"(no caption)")}</div>
       <div class="meta">${meta.map(m=>`<span>${m}</span>`).join("")}</div>`;
     card.onclick=()=>openDetail(p.id); grid.appendChild(card);
   });
 }
 
-/* ── 详情 ── */
+/* ── detail ── */
 let curImg="";
 function renderDetail(p){
   show("detail");
   curImg=imgUrl(p);
   $("detailImg").src=curImg;
   $("peerName").innerHTML=esc(peerName);
-  $("detailCap").textContent=p.caption||"（无说明）";
+  $("detailCap").textContent=p.caption||"(no caption)";
   $("detailTime").textContent=p.time||"";
   const tags=$("detailTags"); tags.innerHTML="";
   if(p.group){ const t=document.createElement("span"); t.className="tag"; t.textContent="# "+p.group; tags.appendChild(t); }
-  $("detailViews").textContent=peerName+"看过 "+(p.views||0)+" 次";
+  $("detailViews").textContent=peerName+" has viewed this "+(p.views||0)+"×";
   const box=$("notesBox"); box.innerHTML="";
   const notes=p.notes_list||[];
-  if(!notes.length){ box.innerHTML=`<div class="none">${esc(peerName)}还没在这张下写评语。</div>`; }
+  if(!notes.length){ box.innerHTML=`<div class="none">${esc(peerName)} hasn't left a note on this one yet.</div>`; }
   else for(const n of notes){
     const el=document.createElement("div"); el.className="note";
     el.innerHTML=`<div class="at">${esc(n.at||"")}</div><div class="tx">${esc(n.text||"")}</div>`;
     box.appendChild(el);
   }
-  $("notesTitle").textContent=peerName+"的评语";
+  $("notesTitle").textContent="Notes from "+peerName;
 }
 async function openDetail(id){
   try{ const p=await (await api("/app/album/photo/"+encodeURIComponent(id))).json(); renderDetail(p);
     trace("photo",{id:String(id),caption:(p.caption||""),group:(p.group||"")}); }
-  catch(e){ if(e.message!=="401") alert("打不开："+e.message); }
+  catch(e){ if(e.message!=="401") alert("Couldn't open it: "+e.message); }
 }
 async function randomOne(){
   closeUpload();
   try{ const p=await (await api("/app/album/random")).json(); renderDetail(p);
     trace("random",{id:String(p.id||""),caption:(p.caption||"")}); }
-  catch(e){ if(e.message!=="401") alert("抽不到："+e.message); }
+  catch(e){ if(e.message!=="401") alert("Couldn't draw one: "+e.message); }
 }
 function openLightbox(){
   if(!curImg) return;
@@ -608,7 +608,7 @@ function openLightbox(){
   document.body.appendChild(lb);
 }
 
-/* ── 上传 modal ── */
+/* ── upload modal ── */
 function openUpload(){
   $("fileInput").value=""; $("capInput").value=""; $("timeInput").value=""; $("groupInput").value="";
   $("preview").classList.add("hidden"); $("uploadStatus").textContent="";
@@ -621,27 +621,27 @@ $("fileInput").addEventListener("change",()=>{
 });
 async function doUpload(){
   const f=$("fileInput").files[0];
-  if(!f){ $("uploadStatus").textContent="先选一张照片"; return; }
+  if(!f){ $("uploadStatus").textContent="Pick a photo first"; return; }
   const qs=new URLSearchParams({ name:f.name||"photo.jpg", caption:$("capInput").value.trim(),
     time:$("timeInput").value.trim(), group:$("groupInput").value.trim() }).toString();
-  $("uploadSend").disabled=true; $("uploadStatus").textContent="上传中…（大图会自动压成看图版）";
+  $("uploadSend").disabled=true; $("uploadStatus").textContent="Uploading… (large images are auto-compressed for viewing)";
   try{
     const d=await (await api("/app/album/upload?"+qs,{ method:"POST",
       headers:authHeaders({"Content-Type":f.type||"application/octet-stream"}), body:f })).json();
-    $("uploadStatus").textContent="已收进相册："+d.id;
+    $("uploadStatus").textContent="Added to the album: "+d.id;
     closeUpload(); await loadList(); openDetail(d.id);
   }catch(e){
-    $("uploadStatus").textContent=e.message==="401"?"":("上传失败："+e.message+(/413|large/.test(e.message)?"（图太大，>10MB）":""));
+    $("uploadStatus").textContent=e.message==="401"?"":("Upload failed: "+e.message+(/413|large/.test(e.message)?" (image too big, >10MB)":""));
   }finally{ $("uploadSend").disabled=false; }
 }
 
-/* ── 接线 ── */
+/* ── wiring ── */
 let searchTimer=0;
 $("searchInput").addEventListener("input",e=>{
   clearTimeout(searchTimer);
   searchTimer=setTimeout(()=>{
     const v=e.target.value.trim();
-    if(v) enterGrid({text:v, title:"搜索结果", noScroll:true});
+    if(v) enterGrid({text:v, title:"Search results", noScroll:true});
     else exitGrid();
   },180);
 });
@@ -666,7 +666,7 @@ $("actRand").onclick=randomOne;
 $("gateHome").onclick=()=>location.assign("index.html");
 $("gateSave").onclick=()=>{ const v=$("gateInput").value.trim(); if(v){ secret=v; localStorage.setItem(LS_KEY,v); loadList(); } };
 
-/* 启动 */
+/* start */
 if(!secret) show("gate"); else loadList();
 </script>
 </body>

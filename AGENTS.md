@@ -1,162 +1,230 @@
-# AGENTS.md — 给「被派来部署本仓库」的 AI 助手
+# AGENTS.md — For an AI assistant tasked with deploying this repo
 
-> **读者是 AI。** 一个人把这个仓库甩给了你,让你帮他在自己的服务器上把这套「私密 AI 伴侣聊天通道」跑起来。
-> 这份文件是**部署 SOP + 决策树 + 避雷点**。先把它读完,再动手。读完你应该能独立完成部署,并在卡住时自己定位问题。
+> **This document is written for an AI.** Someone has handed you this repository and
+> asked you to help them get this "private AI companion chat channel" running on their
+> own server.
+> This file is a **deployment SOP + decision tree + pitfall list**. Read it fully
+> before doing anything. After reading it you should be able to complete the
+> deployment independently, and diagnose issues yourself when you get stuck.
 >
-> 配套可直接抄的代码在 [`examples/`](examples/):接任意 LLM 的 bridge、Windows 自动确认脚本、env 模板。
+> Ready-to-copy code lives in [`examples/`](examples/): a bridge for any LLM, a
+> Windows auto-confirm script, and env templates.
 
 ---
 
-## 0. 30 秒看懂你要装什么
+## 0. What you're installing, in 30 seconds
 
-三件套,一把钥匙串起来:
+Three pieces, tied together by one shared key:
 
-| 组件 | 跑在哪 | 作用 | 要不要改 |
+| Component | Runs where | Does what | Need to modify it? |
 |---|---|---|---|
-| `backend/` relay | 用户的 VPS(需 HTTPS 域名) | 消息落库 + SSE 扇出 + 鉴权 | 几乎不用改,填 env 即可 |
-| `web/` PWA | 同一台 VPS(静态文件) | 手机端聊天壳子,装到主屏 | 改顶部 `CONFIG` 4 行 |
-| **AI 侧** | 用户的电脑 / 服务器 | 真正的「AI 大脑」,收消息→生成→回复 | **取决于用户用什么模型,见 §2** |
+| `backend/` relay | User's VPS (needs an HTTPS domain) | Persists messages + fans out via SSE + auth | Almost never — just fill in env vars |
+| `web/` PWA | Same VPS (static files) | The phone-side chat shell, added to the home screen | Edit 4 lines at the top of `CONFIG` |
+| **AI side** | User's computer / server | The actual "AI brain" — receives messages → generates → replies | **Depends on which model the user uses, see §2** |
 
-**一把钥匙**:`RELAY_SECRET` 同时守后端、前端登录、AI 侧。三处必须**完全一致**。
+**One shared key**: `RELAY_SECRET` guards the backend, the frontend login, and the AI
+side all at once. All three **must match exactly**.
 
-**关键事实**:前端和后端**完全不关心 AI 是谁**——它们只认 relay 的 HTTP/SSE 端点。所以「换不同的大模型」=只换 AI 侧那一层,前后端原样不动。
-
----
-
-## 1. 部署顺序(必须按序,每步先验证再进下一步)
-
-### ① 后端 relay —— 先跑通它,其余都是它的客户端
-跟着 [`backend/DEPLOY.md`](backend/DEPLOY.md)。要点:
-- 需要 **Linux VPS + 一个已配好 HTTPS 的域名**(PWA/SW/Push 强制 https,没证书先 `certbot`)。
-- `cp .env.example relay.env`,生成 `RELAY_SECRET`,填 `RELAY_ALLOW_ORIGINS`(用户的 https origin)。
-- systemd 起 `companion-relay`,nginx 贴两个 location(`/relay/` 反代 + `/chat/` 静态)。
-- **验证**:`curl https://域名/relay/healthz` 返回 `{"ok":true,...}` 才算过。
-
-### ② 前端 PWA
-跟着 [`web/DEPLOY.md`](web/DEPLOY.md)。`rsync web/` 到 nginx 静态目录,改 `index.html` 顶部 `CONFIG` 的 `APP_NAME/AI_NAME/HUMAN_NAME/SINCE`。
-- **验证**:手机开 `https://域名/chat/`,登录框输入 `RELAY_SECRET` 能进聊天页。
-- 想零后端先看 UI:把 `index.html` 里 `USE_MOCK=true`,会自带假对话(看完记得改回 `false`)。
-
-### ③ AI 侧 —— 见下面的决策树,这是大部分人卡住的地方
+**Key fact**: the frontend and backend **don't care at all who the AI is** — they only
+know the relay's HTTP/SSE endpoints. So "switching to a different model" only means
+swapping out the AI-side layer; the frontend and backend stay untouched.
 
 ---
 
-## 2. 决策树:用户的「AI 大脑」是什么?
+## 1. Deployment order (must be sequential — verify each step before moving to the next)
 
-> ⚠️ **先问清楚用户用哪个模型/工具**,再选路径。选错会白装。
+### ① Backend relay — get this running first; everything else is its client
+Follow [`backend/DEPLOY.md`](backend/DEPLOY.md). Key points:
+- Requires a **Linux VPS + a domain already configured for HTTPS** (the PWA/service
+  worker/push all require https — run `certbot` first if you don't have a cert).
+- `cp .env.example relay.env`, generate a `RELAY_SECRET`, fill in
+  `RELAY_ALLOW_ORIGINS` (the user's real https origin).
+- Start `companion-relay` under systemd; nginx needs two locations (`/relay/` reverse
+  proxy + `/chat/` static).
+- **Verify**: `curl https://<domain>/relay/healthz` must return `{"ok":true,...}`.
 
-| 用户的大脑 | 走哪条路 | 怎么做 |
+### ② Frontend PWA
+Follow [`web/DEPLOY.md`](web/DEPLOY.md). `rsync web/` to nginx's static directory,
+edit the `CONFIG` block at the top of `index.html`
+(`APP_NAME`/`AI_NAME`/`HUMAN_NAME`/`SINCE`).
+- **Verify**: open `https://<domain>/chat/` on a phone, enter `RELAY_SECRET` in the
+  login box, and you should reach the chat page.
+- To preview the UI with zero backend: set `USE_MOCK=true` in `index.html` — it ships
+  with a fake conversation (remember to set it back to `false` afterward).
+
+### ③ AI side — see the decision tree below; this is where most people get stuck
+
+---
+
+## 2. Decision tree: what is the user's "AI brain"?
+
+> ⚠️ **Confirm which model/tool the user is using first**, then pick a path. Picking
+> the wrong one wastes the whole setup.
+
+| User's brain | Which path | How |
 |---|---|---|
-| **Claude Code**(CC,本地 agent) | 用仓库自带的 `channel/` 插件 | 跟着 [`channel/DEPLOY.md`](channel/DEPLOY.md):放文件、写 `~/.claude/channels/companion/.env`、注册 `.mcp.json`、启动带 `--dangerously-load-development-channels server:companion`。**会弹一个确认框,见 §4。** |
-| **GPT / DeepSeek / Gemini / GLM / Kimi / 通义 / 本地 vLLM / 任意 OpenAI 兼容 API** | **不要碰 `channel/`**,跑一个 bridge | 用 [`examples/bridge_any_llm.py`](examples/bridge_any_llm.py),见 §3。 |
-| 其他自研 agent / 框架(LangChain、自己的 loop…) | 自己写薄薄一层 | 照 §3 的协议,把「调 LLM」那段换成你的逻辑即可。 |
+| **Claude Code** (CC, a local agent) | Use the repo's built-in `channel/` plugin | Follow [`channel/DEPLOY.md`](channel/DEPLOY.md): place the files, write `~/.claude/channels/companion/.env`, register `.mcp.json`, and start with `--dangerously-load-development-channels server:companion`. **A confirmation dialog will pop up — see §4.** |
+| **GPT / DeepSeek / Gemini / GLM / Kimi / Qwen / local vLLM / any OpenAI-compatible API** | **Don't touch `channel/`** — run a bridge instead | Use [`examples/bridge_any_llm.py`](examples/bridge_any_llm.py), see §3. |
+| Some other custom agent / framework (LangChain, a homegrown loop…) | Write a thin layer yourself | Follow the protocol in §3 and swap in your own logic for "call the LLM". |
 
-> **为什么 `channel/` 插件只给 Claude Code?** 它是 CC **专有**的 channel 机制(靠 `experimental:{'claude/channel':{}}` + `--dangerously-load-development-channels` 把外部消息**主动推进**会话)。GPT/Gemini/Codex 等没有这个概念,硬塞跑不起来。但它们都能用 §3 的 bridge——因为 relay 的协议是中立的 HTTP/SSE。
+> **Why is the `channel/` plugin Claude-Code-only?** It relies on CC's **proprietary**
+> channel mechanism (using `experimental:{'claude/channel':{}}` plus
+> `--dangerously-load-development-channels` to actively push external messages into a
+> session). GPT/Gemini/Codex etc. have no equivalent concept, so it can't be forced to
+> work there. But they can all use the §3 bridge, because the relay's protocol is
+> neutral HTTP/SSE.
 
 ---
 
-## 3. 接任意 LLM API(最高频需求,讲细一点)
+## 3. Wiring up any LLM API (the most common need — covered in detail)
 
-### 3.1 原理:一个薄循环,三步
+### 3.1 How it works: a thin, three-step loop
 
-AI 侧本质就是个**「带工具的聊天」循环**(不是会自己乱跑的自主 agent——它只在收到人类消息时动一次):
+The AI side is essentially a **"chat loop with tools"** (not a freely-roaming
+autonomous agent — it only acts once per incoming human message):
 
 ```
-① SSE 长连   GET  {RELAY}/channel/in?since={cursor}   ← 收人类发来的消息(实时)
-② 组上下文 + 调你的模型(OpenAI chat/completions 格式)
-③ POST       {RELAY}/channel/out  {"type":"reply","text":"..."}   → 回复回到手机
+① Long-lived SSE  GET  {RELAY}/channel/in?since={cursor}   ← receive human messages (real-time)
+② Assemble context + call your model (OpenAI chat/completions format)
+③ POST             {RELAY}/channel/out  {"type":"reply","text":"..."}   → reply back to the phone
 ```
 
-- **①** 和 channel 插件用的是**同一个 SSE 端点**,只是把「喂给 Claude Code」换成「喂给你的模型」。
-- **② 上下文**:别让模型失忆。每收到一条,就 `GET {RELAY}/app/history?limit=N` 拉最近 N 条,转成 `messages`(human→`user`,ai→`assistant`),最前面放一段 `system`(人设/persona)。
-- **③** 出站带 `Authorization: Bearer {RELAY_SECRET}`。
+- **①** uses the **same SSE endpoint** the channel plugin uses — you're just feeding
+  the messages to your own model instead of Claude Code.
+- **② Context**: don't let the model forget everything. On every incoming message,
+  `GET {RELAY}/app/history?limit=N` to fetch the most recent N messages, convert them
+  into `messages` (human → `user`, ai → `assistant`), and prepend a `system` message
+  (persona/character).
+- **③** outbound requests need `Authorization: Bearer {RELAY_SECRET}`.
 
-> 直接用 [`examples/bridge_any_llm.py`](examples/bridge_any_llm.py) —— 它把这三步写全了(stdlib,零 pip 依赖),填好 env 就能 `python bridge_any_llm.py` 跑起来。
+> Just use [`examples/bridge_any_llm.py`](examples/bridge_any_llm.py) — it implements
+> all three steps (stdlib only, zero pip dependencies). Fill in the env vars and run
+> `python bridge_any_llm.py`.
 
-### 3.2 各家 API 怎么填(都走 OpenAI 兼容格式)
+### 3.2 Provider settings (all use the OpenAI-compatible format)
 
-`bridge_any_llm.py` 只认 `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` 三个值:
+`bridge_any_llm.py` only reads three values: `LLM_API_BASE` / `LLM_API_KEY` /
+`LLM_MODEL`:
 
-| 家 | `LLM_API_BASE` | `LLM_MODEL` 例 |
+| Provider | `LLM_API_BASE` | Example `LLM_MODEL` |
 |---|---|---|
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| 通义千问(DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
-| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.6` |
+| Qwen (DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| Zhipu GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.6` |
 | Moonshot Kimi | `https://api.moonshot.cn/v1` | `kimi-k2` |
 | **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-pro` |
-| 本地 vLLM / Ollama | `http://127.0.0.1:8000/v1` | 你的本地模型名 |
+| Local vLLM / Ollama | `http://127.0.0.1:8000/v1` | your local model name |
 
-> Gemini 用它的 **OpenAI 兼容端点**(上表)就能直接接,不用改代码。其它任何「OpenAI 兼容」的中转/自建端点同理。
+> Gemini works directly via its **OpenAI-compatible endpoint** (above) with no code
+> changes. The same applies to any other "OpenAI-compatible" proxy or self-hosted
+> endpoint.
 
-### 3.3 进阶(可选,bridge 里留了扩展点)
+### 3.3 Advanced (optional — the bridge leaves extension points for these)
 
-- **多模型 fallback**:配一串端点,按错误码 `{401,403,404,429,500,502,503,504}` 顺次切——一个挂了自动下一个。(这是实战经验:中转站经常单点抽风。)
-- **工具调用**:模型若支持 function calling,可把 MCP/工具的 `tools` 喂进去,模型出 `tool_calls` 就执行再喂回,循环上限设 8 步,防止无限套娃。
-- **图片/附件**:人类发的图在 `attachments[].url`,先 `GET {RELAY}/uploads/{name}?token={SECRET}` 下载,再按你模型的多模态格式(base64/url)喂进去;非多模态模型就降级成一句文字提示。
+- **Multi-model fallback**: configure a chain of endpoints and fail over in order on
+  error codes `{401,403,404,429,500,502,503,504}` — if one goes down, it automatically
+  tries the next. (This comes from real-world experience: relay/proxy providers
+  frequently have flaky single points of failure.)
+- **Tool calling**: if the model supports function calling, feed it the MCP/tool
+  `tools` definitions; when the model returns `tool_calls`, execute them and feed the
+  results back, capping the loop at 8 steps to prevent infinite recursion.
+- **Images/attachments**: images sent by the human are in `attachments[].url` — first
+  `GET {RELAY}/uploads/{name}?token={SECRET}` to download it, then feed it in using
+  your model's multimodal format (base64/URL); for non-multimodal models, fall back to
+  a text placeholder.
 
-### 3.4 ⚠️ 单身体原则(最容易忽略的坑)
+### 3.4 ⚠️ Single-body principle (the easiest pitfall to overlook)
 
-relay 是**单用户单通道**。**同一时刻只能有一个 AI 侧接入** `/channel/in`。如果你既开着 Claude Code channel、又跑着 bridge,**两个都会收到同一条消息、都会回复 → 用户看到双重回复**。换大脑时,先停掉旧的那个进程,再起新的。
+The relay is **single-user, single-channel**. **Only one AI side may be connected to**
+`/channel/in` **at a time**. If both the Claude Code channel and the bridge are
+running simultaneously, **both will receive the same message and both will reply →
+the user sees duplicate replies**. When switching brains, stop the old process first,
+then start the new one.
 
 ---
 
-## 4. 专题:Claude Code 的 DevChannelsDialog 确认框(无人值守必看)
+## 4. Deep dive: Claude Code's DevChannelsDialog confirmation popup (must-read for unattended setups)
 
-> 仅当用户走「Claude Code + `channel/` 插件」这条路时相关。用 API bridge 的**没有**这个问题。
+> Only relevant if the user is on the "Claude Code + `channel/` plugin" path. The API
+> bridge path **does not** have this problem.
 
-**现象**:CC 用 `--dangerously-load-development-channels server:companion` 启动时,**每次都会弹一个交互框**:
+**Symptom**: when CC starts with
+`--dangerously-load-development-channels server:companion`, **an interactive dialog
+appears every time**:
 ```
 WARNING: Loading development channels
-  1. I am using this for local development   ← 默认高亮,按 Enter 即过
+  1. I am using this for local development   ← highlighted by default, Enter confirms
   2. Exit
 ```
-**为什么躲不掉**:自建本地 `server:` 频道进不了 channel allowlist(那需要 Team/Enterprise 计划),这个框**不吃** `--dangerously-skip-permissions`,也没有任何 env / settings 能静默它。无人值守(开机自启、自动重启)时,它会**一直卡在这一步**,channel 连不上、前端收不到消息。
+**Why it can't be avoided**: a self-hosted local `server:` channel can't get onto the
+channel allowlist (that requires a Team/Enterprise plan), and this dialog **ignores**
+`--dangerously-skip-permissions` — there's no env var or setting that silences it. In
+unattended scenarios (boot-time autostart, auto-restart), it will **hang indefinitely
+at this step**: the channel never connects and the frontend never receives messages.
 
-**解法:启动 CC 后,自动替它按一下 Enter。** 按部署环境二选一:
+**Fix: after starting CC, automatically press Enter for it.** Pick one based on your
+deployment environment:
 
-- **Linux / macOS + tmux(推荐,最干净)**:把 CC 跑在 tmux 里,启动后给它发个回车:
+- **Linux / macOS + tmux (recommended, cleanest)**: run CC inside tmux, then send it a
+  return keypress after it starts:
   ```bash
   tmux new-session -d -s cc 'claude --dangerously-load-development-channels server:companion'
   sleep 3
-  tmux send-keys -t cc Enter        # 替你确认 DevChannelsDialog
+  tmux send-keys -t cc Enter        # confirms the DevChannelsDialog for you
   ```
-  (保险起见可在前 20 秒内每 2 秒 `send-keys -t cc Enter` 送几次;多余的空回车落在输入框无害。)
+  (For safety, you can send `Enter` a few more times every 2 seconds during the first
+  20 seconds; extra blank Enters landing in the input box are harmless.)
 
-- **Windows(无 tmux)**:用 `AttachConsole(pid) + WriteConsoleInput` 往 CC 的子控制台注入回车。可直接用 [`examples/confirm_dev_channel_win.py`](examples/confirm_dev_channel_win.py)(源自实战做法的最小独立实现:启动 CC 后开后台线程,2~20 秒内每 2 秒送一次回车,`try/except` 包住,失败不影响 CC;未覆盖所有 Windows/CC 版本,按需调 window/interval)。
+- **Windows (no tmux)**: use `AttachConsole(pid) + WriteConsoleInput` to inject a
+  return keypress into CC's child console. You can use
+  [`examples/confirm_dev_channel_win.py`](examples/confirm_dev_channel_win.py)
+  directly (a minimal standalone implementation based on a proven real-world
+  approach: after starting CC, it spawns a background thread that sends a return
+  keypress every 2 seconds for 2–20 seconds, wrapped in `try/except` so a failure
+  doesn't affect CC; it doesn't cover every Windows/CC version combination — adjust
+  the window/interval as needed).
 
-- **通用兜底**:`expect` / `pexpect` 包住启动命令,匹配到 `WARNING: Loading development channels` 就送 `\r`。
+- **General fallback**: wrap the startup command with `expect` / `pexpect`, and send
+  `\r` when it matches `WARNING: Loading development channels`.
 
-**验证**:CC 的 stderr 出现 `[companion:boot] connected ...` 即确认成功、channel 已连。
+**Verification**: seeing `[companion:boot] connected ...` in CC's stderr confirms the
+channel is connected.
 
 ---
 
-## 5. 避雷点清单(用户最常栽的,排查时逐条过)
+## 5. Pitfall checklist (the most common things users get stuck on — go through these one by one when troubleshooting)
 
-| # | 症状 | 真因 / 解法 |
+| # | Symptom | Real cause / fix |
 |---|---|---|
-| 1 | PWA 装不上 / SW 不注册 / 收不到推送 | **没用 HTTPS**。PWA 安装、Service Worker、Web Push 三者强制 https,`http://` 和 `file://` 都不行。 |
-| 2 | 所有请求 401 | `RELAY_SECRET` **三处不一致**(后端 relay.env / 前端登录框 / AI 侧)。必须同一把。 |
-| 3 | 前端「连上了但收不到实时消息」 | nginx 把 SSE 缓冲了。`/relay/` 块必须 `proxy_buffering off; proxy_read_timeout 3600s;`(模板里已写好,别删)。**头号隐形坑。** |
-| 4 | 浏览器 console 报 CORS | `RELAY_ALLOW_ORIGINS` 没填用户真实的 https origin。 |
-| 5 | 图片发出去但加载 404 | `RELAY_PUBLIC_PREFIX` 和 nginx 的 location 前缀不一致(附件 URL 用前缀拼)。两者要相等(默认都 `/relay`)。 |
-| 6 | 传图 413 | nginx `client_max_body_size` < `RELAY_MAX_UPLOAD_BYTES`。调大 nginx。 |
-| 7 | 改了前端「没生效」,老用户停在旧界面 | 改 `web/` 后没 bump `sw.js` 顶部的 `CACHE` 版本号(`companion-v1`→`v2`)。PWA 预缓存了旧壳。 |
-| 8 | 自己写 AI 侧,SSE 连不上 | 浏览器 `EventSource` 设不了 header,所以 relay 的 SSE **也接受 `?token=<SECRET>`**;但你在服务端(bridge)写 SSE client 时,**应该用 `Authorization: Bearer` header**。 |
-| 9 | 模型「失忆」,每条都像第一次说话 | 没拼上下文。每轮 `GET /app/history?limit=N` 拉历史组成 `messages`,见 §3.1。 |
-| 10 | bridge 断线后不再收消息 | SSE 会断,要外层 while 重连,并带 `?since={已处理的最大id}` 让 relay 补发断线期间的消息(别从 0 重拉,会重复回复)。 |
-| 11 | 用户收到双重回复 | 违反**单身体原则**(§3.4):CC 和 bridge 同时连着。停一个。 |
+| 1 | PWA won't install / service worker won't register / no push notifications | **Not using HTTPS.** PWA install, the service worker, and Web Push all require https — neither `http://` nor `file://` will work. |
+| 2 | Every request returns 401 | `RELAY_SECRET` **doesn't match across all three places** (backend `relay.env` / frontend login box / AI side). It must be the exact same key everywhere. |
+| 3 | Frontend "connects but never receives real-time messages" | nginx is buffering the SSE stream. The `/relay/` block must have `proxy_buffering off; proxy_read_timeout 3600s;` (already in the template — don't remove it). **The #1 hidden pitfall.** |
+| 4 | Browser console shows CORS errors | `RELAY_ALLOW_ORIGINS` doesn't contain the user's real https origin. |
+| 5 | Images send but fail to load (404) | `RELAY_PUBLIC_PREFIX` doesn't match nginx's location prefix (attachment URLs are built using this prefix). The two must be identical (both default to `/relay`). |
+| 6 | Image upload returns 413 | nginx's `client_max_body_size` is smaller than `RELAY_MAX_UPLOAD_BYTES`. Increase the nginx setting. |
+| 7 | Frontend changes "don't take effect" — existing users stuck on the old UI | After editing `web/`, the `CACHE` version at the top of `sw.js` wasn't bumped (`companion-v1` → `v2`). The PWA precached the old shell. |
+| 8 | Writing your own AI side and SSE won't connect | Browsers' `EventSource` can't set custom headers, so the relay's SSE endpoints **also accept `?token=<SECRET>`** — but when writing an SSE client server-side (a bridge), you **should use the `Authorization: Bearer` header** instead. |
+| 9 | The model "forgets everything" — every message feels like the first one | Context isn't being assembled. On every turn, `GET /app/history?limit=N` to pull history and build `messages` — see §3.1. |
+| 10 | The bridge stops receiving messages after a disconnect | SSE connections do drop — wrap it in an outer reconnect loop, and pass `?since={highest processed id}` so the relay resends messages missed during the disconnect (don't re-pull from 0 — that causes duplicate replies). |
+| 11 | The user receives duplicate replies | Violates the **single-body principle** (§3.4): both CC and the bridge are connected at once. Stop one of them. |
 
 ---
 
-## 6. 做完自检(交付给用户前,自己跑一遍)
+## 6. Self-check before handing off to the user
 
-- [ ] `curl https://域名/relay/healthz` → `{"ok":true}`
-- [ ] 手机 `https://域名/chat/` 能登录、能看到聊天页
-- [ ] 在 PWA 发一条消息 → AI 侧进程收到(看 bridge / CC 日志)
-- [ ] AI 回复 → 手机几秒内出现气泡
-- [ ] 发一张图 → AI 侧能拿到(多模态模型能看图)
-- [ ] 关掉手机 PWA(后台)→ 再让 AI 回一条 → 锁屏收到推送(若配了 VAPID)
-- [ ] **安全**:`relay.env`/`*.pem`/`relay.db`/各种 API key 都没进 git;`RELAY_SECRET` 是新生成的、没复用别人的
+- [ ] `curl https://<domain>/relay/healthz` → `{"ok":true}`
+- [ ] On a phone, `https://<domain>/chat/` logs in and shows the chat page
+- [ ] Sending a message from the PWA → the AI-side process receives it (check bridge /
+      CC logs)
+- [ ] The AI replies → a bubble appears on the phone within a few seconds
+- [ ] Sending an image → the AI side can retrieve it (multimodal models can see it)
+- [ ] Backgrounding the PWA on the phone → having the AI send another reply → a
+      lock-screen push notification arrives (if VAPID is configured)
+- [ ] **Security**: `relay.env`/`*.pem`/`relay.db`/any API keys are not committed to
+      git; `RELAY_SECRET` is freshly generated and not reused from anywhere else
 
-> 安全底线:`RELAY_SECRET` 泄露 = 任何人都能读全部对话、冒充任意一方。这是单用户模型,一把钥匙代表「就你和你的 AI」。详见各 `DEPLOY.md` 的「安全」节。
+> Security baseline: if `RELAY_SECRET` leaks, anyone can read the entire
+> conversation and impersonate either party. This is a single-user model — one key
+> represents "just you and your AI." See the "Security" section in each `DEPLOY.md`
+> for details.

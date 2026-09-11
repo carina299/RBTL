@@ -1,240 +1,248 @@
-# Companion Relay · 后端部署文档
+# Companion Relay · Backend Deployment Guide
 
-一个**私密 1:1 聊天通道**的服务器端：把「你手机上的 PWA」和「你电脑上本地运行的 AI 伴侣（以 Claude Code *channel 插件* 形态跑）」连起来。单用户、单密钥，没有账号体系，没有第三方托管——消息只经过**你自己的服务器**。
+A server-side component for a **private 1:1 chat channel**: it connects the “PWA on your phone” with the locally running AI companion on your computer (running as a **Claude Code *channel plugin***). Single-user, single-key, no account system, no third-party hosting—the messages only pass through **your own server**.
 
-> 这是一份从一对 AI 伴侣的自用系统里抽出来、**彻底脱敏**的可复用版本。所有名字、密钥、域名、路径都参数化进了环境变量，代码本身不含任何私人信息。把它当成你自己的底座，放心改。
+> This is a reusable version extracted from a private AI companion system and **thoroughly sanitized**. All names, keys, domains, and paths are parameterized through environment variables, and the code itself contains no private information. Treat it as your own foundation and feel free to modify it.
 
 ---
 
-## 0. 架构一眼
+## 0. Architecture at a Glance
 
 ```
-   你的手机                                            你的电脑（本地）
+   Your phone                                            Your computer (local)
   ┌─────────┐                                       ┌──────────────────────┐
   │  PWA    │                                       │  Claude Code          │
-  │ (网页   │                                       │  + channel 插件 = AI侧 │
-  │  装到   │                                       └─────────┬────────────┘
-  │  桌面)  │                                                 │  长连
-  └────┬────┘                                                 │  GET  /relay/channel/in   (SSE，收你的话)
-       │ HTTPS                                                │  POST /relay/channel/out  (回复/戳一戳)
+  │ (web    │                                       │  + channel plugin     │
+  │  app    │                                       │    = AI side          │
+  │  added  │                                       └─────────┬────────────┘
+  │  to     │                                                 │  persistent
+  │  home)  │                                                 │  connection
+  └────┬────┘                                                 │  GET  /relay/channel/in   (SSE, receive your messages)
+       │ HTTPS                                                │  POST /relay/channel/out  (replies / poke)
        ▼                                                      │
-  ┌──────────────────────── 你的 VPS（nginx, 443/TLS）───────┼───────────────┐
-  │   /chat/   → 静态文件（PWA 本体）                          │               │
-  │   /relay/  → 反向代理 ─────────────►  127.0.0.1:3011  (本后端 app.py) ◄──┘ │
-  │                                            │  sqlite 落库 + SSE 扇出        │
+  ┌────────────────────────  Your VPS (nginx, 443/TLS) ───────┼───────────────┐
+  │   /chat/   → static files (PWA)                            │               │
+  │   /relay/  → reverse proxy ─────────────►  127.0.0.1:3011 │               │
+  │                                            (backend app.py) ◄──────────────┘
+  │                                            │  SQLite persistence + SSE fan-out
   └────────────────────────────────────────────────────────────────────────┘
 
-数据流：
-  你在 PWA 打字 → POST /relay/app/send → 落库 → SSE 推给插件 → 你的 AI 读到
-  AI 回复       → POST /relay/channel/out → 落库 → SSE 推给 PWA（前台直接显示，
-                                                     后台则发一条锁屏推送）
+Data flow:
+  You type in the PWA → POST /relay/app/send → persist → SSE to plugin → your AI reads it
+  AI replies       → POST /relay/channel/out → persist → SSE to PWA (display directly
+                                                       when foreground;
+                                                       send a lock-screen push when background)
 ```
 
-**两端，一把钥匙**：每个端点都用同一个 Bearer 密钥（`RELAY_SECRET`）守。浏览器原生 `EventSource` 设不了自定义头，所以 SSE 端点也接受 `?token=` 查询参数。
+**Two sides, one key**: every endpoint is protected by the same Bearer key (`RELAY_SECRET`). Since the browser's native `EventSource` cannot set custom headers, SSE endpoints also accept `?token=` as a query parameter.
 
 ---
 
-## 1. 前置条件
+## 1. Prerequisites
 
-- 一台 Linux VPS（Ubuntu 22.04+，有 root）
-- **一个域名，已指向 VPS，且 nginx 已配好 HTTPS**
-  → PWA 安装、Service Worker、Web Push **三者都强制要求 HTTPS**，`http://` 装不了 PWA
-  → 没证书的话先用 certbot 搞定：`apt install certbot python3-certbot-nginx && certbot --nginx -d your-domain.example`
-- Python 3.10+
-- 本后端这套依赖很轻：FastAPI + uvicorn（+ 可选的 pywebpush）
+* A Linux VPS (Ubuntu 22.04+, with root access)
+* **A domain name pointing to the VPS, with nginx already configured for HTTPS**
+  → PWA installation, Service Worker, and **Web Push** all require HTTPS. A PWA cannot be installed over `http://`.
+  → If you don't have a certificate yet, use certbot first: `apt install certbot python3-certbot-nginx && certbot --nginx -d your-domain.example`
+* Python 3.10+
+* This backend has very lightweight dependencies: FastAPI + uvicorn (+ optional pywebpush)
 
 ---
 
-## 2. 部署步骤
+## 2. Deployment Steps
 
-### 2.1 放文件 + 建虚拟环境
+### 2.1 Copy Files + Create a Virtual Environment
 
 ```bash
 mkdir -p /root/companion-relay
 cd /root/companion-relay
-# 把本目录里的 app.py / requirements.txt 拷进来
+# Copy app.py / requirements.txt from this directory
 
 python3 -m venv venv
 ./venv/bin/pip install -U pip
 ./venv/bin/pip install -r requirements.txt
 ```
 
-### 2.2 生成密钥，写 relay.env
+### 2.2 Generate a Secret and Create relay.env
 
 ```bash
 cp .env.example relay.env
-chmod 600 relay.env          # 只有 root 能读，关键
+chmod 600 relay.env          # readable only by root, critical
 
-# 生成一把全新的随机密钥（千万别复用别人的）：
+# Generate a brand-new random secret (NEVER reuse someone else's):
 ./venv/bin/python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-把生成的密钥填进 `relay.env` 的 `RELAY_SECRET=`，并填好这几项：
+Put the generated secret into `RELAY_SECRET=` in `relay.env`, and fill in these fields:
 
-| 变量 | 填什么 |
-|---|---|
-| `RELAY_SECRET` | 上面生成的随机串（**手机 PWA 里也要填同一个**） |
-| `RELAY_AI_NAME` | 你 AI 伴侣的名字（推送标题、语音旁白会用到） |
-| `RELAY_HUMAN_NAME` | 你的名字（AI 收到「××开启了语音通话」时的那个××） |
-| `RELAY_PUBLIC_PREFIX` | nginx 上 API 的挂载前缀，默认 `/relay`，**改了要和 nginx 一致** |
-| `RELAY_APP_PATH` | 点推送通知打开 PWA 的路径，默认 `/chat/` |
-| `RELAY_ALLOW_ORIGINS` | 你的 `https://your-domain.example`（CORS 白名单） |
+| Variable              | What to enter                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------ |
+| `RELAY_SECRET`        | The random string generated above (**the same one must also be entered in the phone PWA**) |
+| `RELAY_AI_NAME`       | The name of your AI companion (used in push notification titles and voice narration)       |
+| `RELAY_HUMAN_NAME`    | Your name (the name used when the AI receives “×× started a voice call”)                   |
+| `RELAY_PUBLIC_PREFIX` | The API mount prefix on nginx, default `/relay`; **if changed, it must match nginx**       |
+| `RELAY_APP_PATH`      | The path used to open the PWA when a push notification is tapped, default `/chat/`         |
+| `RELAY_ALLOW_ORIGINS` | Your `https://your-domain.example` (CORS allowlist)                                        |
 
-MiniMax / VAPID 那几项**可以先留空**，后端会自动降级（没配语音就不发声、没配推送就不推锁屏），核心聊天照常跑。等核心通了再回头开（见 §3、§4）。
+The MiniMax / VAPID fields **can be left empty for now**. The backend will automatically degrade gracefully (no voice if TTS isn't configured, no lock-screen pushes if push isn't configured), while core chat continues to work normally. Enable them later once the core system is working (see §3 and §4).
 
-### 2.3 systemd 托管
+### 2.3 Run Under systemd
 
 ```bash
 cp companion-relay.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now companion-relay
-systemctl status companion-relay        # 应为 active (running)
-journalctl -u companion-relay -n 50     # 看日志
+systemctl status companion-relay        # should be active (running)
+journalctl -u companion-relay -n 50     # view logs
 ```
 
-> 改完 `app.py` 后重启：`systemctl restart companion-relay`
-> 改 env 后同样要 restart 才生效。
+> After modifying `app.py`, restart with: `systemctl restart companion-relay`
+> After modifying the env file, you also need to restart for the changes to take effect.
 
-### 2.4 nginx 接入
+### 2.4 Connect nginx
 
-打开 `nginx-companion.conf.example`，把里面两个 `location` 块**粘进你域名那个 `server { listen 443 ssl; ... }` 块内部**，然后：
+Open `nginx-companion.conf.example`, copy the two `location` blocks into the `server { listen 443 ssl; ... }` block for your domain, then:
 
 ```bash
 nginx -t && systemctl reload nginx
 ```
 
-要点（模板里已写好，这里强调）：
-- `/relay/` 反代到 `127.0.0.1:3011`，**带末尾斜杠**（剥掉 `/relay` 前缀）
-- SSE 必须：`proxy_buffering off; proxy_read_timeout 3600s;`——否则流会被缓冲/掐断
-- `client_max_body_size 10m;`——要 ≥ `RELAY_MAX_UPLOAD_BYTES`，否则传图 413
+Key points (already included in the template, but worth emphasizing):
 
-### 2.5 冒烟测试（必做）
+* `/relay/` is reverse-proxied to `127.0.0.1:3011`, **with a trailing slash** (strips the `/relay` prefix)
+* SSE requires: `proxy_buffering off; proxy_read_timeout 3600s;`—otherwise the stream may be buffered or terminated
+* `client_max_body_size 10m;`—must be ≥ `RELAY_MAX_UPLOAD_BYTES`, otherwise image uploads will return 413
+
+### 2.5 Smoke Tests (Required)
 
 ```bash
-S=填你的RELAY_SECRET
+S=your_RELAY_SECRET
 
-# 1) 健康检查（不需要密钥）
+# 1) Health check (no secret required)
 curl -s https://your-domain.example/relay/healthz
-#   期望: {"ok":true,"plugin_subs":0,"app_subs":0}
+#   expected: {"ok":true,"plugin_subs":0,"app_subs":0}
 
-# 2) 发一条消息（模拟 PWA → 落库）
+# 2) Send a message (simulate PWA → persistence)
 curl -s -X POST https://your-domain.example/relay/app/send \
   -H "Authorization: Bearer $S" -H "Content-Type: application/json" \
   -d '{"text":"hello from curl"}'
-#   期望: {"id":1}
+#   expected: {"id":1}
 
-# 3) 取历史
+# 3) Fetch history
 curl -s "https://your-domain.example/relay/app/history" -H "Authorization: Bearer $S"
-#   期望: {"messages":[{...,"from":"human","text":"hello from curl"...}]}
+#   expected: {"messages":[{...,"from":"human","text":"hello from curl"...}]}
 
-# 4) 实时流（开一个终端挂着，另一个终端再发一条 send，这边应立刻收到）
+# 4) Real-time stream (keep one terminal running; send another message with send from another terminal, and this one should receive it immediately)
 curl -N "https://your-domain.example/relay/app/stream?token=$S"
 ```
 
-四步都通 = 后端就绪。接下来接前端 PWA 和本地 AI 侧插件。
+All four steps working = the backend is ready. Next, connect the frontend PWA and the local AI-side plugin.
 
 ---
 
-## 3. MiniMax TTS（可选——让 AI 的回复能朗读出来）
+## 3. MiniMax TTS (Optional — Read AI Replies Aloud)
 
-1. 去 MiniMax 控制台注册，拿到 **API Key**、**Group ID**，并创建/挑一个**音色 voice_id**。
-2. 填进 `relay.env`：`MINIMAX_API_KEY` / `MINIMAX_GROUP_ID` / `MINIMAX_VOICE_ZH`（音色 id）。
-3. `systemctl restart companion-relay`。
-4. 前端调 `POST /relay/app/tts {"text":"..."}` 会返回一段 mp3。没配或失败时前端应自行降级（不发声）。
+1. Register in the MiniMax console, obtain an **API Key** and **Group ID**, and create/select a **voice_id**.
+2. Add them to `relay.env`: `MINIMAX_API_KEY` / `MINIMAX_GROUP_ID` / `MINIMAX_VOICE_ZH` (voice ID).
+3. `systemctl restart companion-relay`.
+4. The frontend calls `POST /relay/app/tts {"text":"..."}` and receives an mp3. If TTS is not configured or fails, the frontend should gracefully degrade (no audio).
 
-> 不想用 MiniMax？这是个独立小函数（`minimax_tts_mp3`），换成任何「文字进、mp3 出」的 TTS 都行，改一处即可。
+> Don't want to use MiniMax? This is an independent small function (`minimax_tts_mp3`). You can replace it with any TTS service that takes text in and outputs mp3—only one place needs to be changed.
 
 ---
 
-## 4. Web Push / VAPID（可选——AI 回复时推到手机锁屏）
+## 4. Web Push / VAPID (Optional — Push AI Replies to the Phone's Lock Screen)
 
-未读推送的逻辑：**只有当 PWA 不在前台**（没有 SSE 连着）时，AI 的 `reply` 才会推一条锁屏通知。前台开着就不打扰。
+Unread push logic: **only when the PWA is not in the foreground** (no active SSE connection) will an AI `reply` trigger a lock-screen notification. If the PWA is open in the foreground, it won't bother you.
 
-### 4.1 生成你自己的 VAPID 密钥对
+### 4.1 Generate Your Own VAPID Key Pair
 
 ```bash
 cd /root/companion-relay
-./venv/bin/vapid --gen                 # 生成 private_key.pem 和 public_key.pem
+./venv/bin/vapid --gen                 # generate private_key.pem and public_key.pem
 ./venv/bin/vapid --applicationServerKey
-#   打印一行： Application Server Key = BJ...（一长串 base64url）
+#   prints one line: Application Server Key = BJ... (a long base64url string)
 ```
 
-填进 `relay.env`：
-- `VAPID_PUBLIC_KEY=` ← 上面打印的那串 base64url（**这是公钥，前端订阅时也要用它**，可公开）
-- `VAPID_PRIVATE_PEM=/root/companion-relay/private_key.pem`（私钥**严禁外泄**）
-- `VAPID_SUBJECT=mailto:你@your-domain.example`
+Add these to `relay.env`:
 
-`chmod 600 private_key.pem`，然后 `systemctl restart companion-relay`。
+* `VAPID_PUBLIC_KEY=` ← the base64url string printed above (**this is the public key; the frontend also needs it for subscription**, and it can be public)
+* `VAPID_PRIVATE_PEM=/root/companion-relay/private_key.pem` (private key—**NEVER expose it**)
+* `VAPID_SUBJECT=mailto:you@your-domain.example`
 
-### 4.2 自测
+`chmod 600 private_key.pem`, then `systemctl restart companion-relay`.
 
-PWA 里允许通知、完成订阅后：
+### 4.2 Self-Test
+
+After allowing notifications in the PWA and completing the subscription:
 
 ```bash
 curl -s -X POST https://your-domain.example/relay/app/push_test \
   -H "Authorization: Bearer $S" -H "Content-Type: application/json" -d '{}'
-#   期望: {"ok":true,"sent":1,"dead":0}
+#   expected: {"ok":true,"sent":1,"dead":0}
 ```
 
-手机锁屏应弹出一条测试通知。`sent:0` 通常是还没在 PWA 里完成订阅。
+A test notification should appear on the phone's lock screen. `sent:0` usually means the PWA subscription has not been completed yet.
 
 ---
 
-## 5. 本地 AI 侧怎么接（简述）
+## 5. Connecting the Local AI Side (Brief Overview)
 
-AI 侧默认是你电脑上的 Claude Code 加一个 **channel 插件**，它：
-- 长连 `GET /relay/channel/in?token=SECRET`（SSE），收到你发的消息就投喂给 Claude；
-- Claude 要回复时，插件 `POST /relay/channel/out`：
-  - 普通回复：`{"type":"reply","text":"..."}`
-  - 戳一戳：`{"type":"react","id":<目标消息id>,"emoji":"❤️"}`（空 emoji = 撤回这一戳）
+The default AI side is Claude Code running on your computer together with a **channel plugin**. It:
 
-不用 Claude Code 时，跳过 `channel/`，直接跑 `examples/bridge_any_llm.py` 接任意 OpenAI-compatible API；想在 VPS 上常驻 API 身体，则用 `examples/api_loop.py` 并通过 `/app/brain` 切到 `loop`。完整决策树见仓库根的 `AGENTS.md` 和 `examples/README.md`。
+* Maintains a persistent connection to `GET /relay/channel/in?token=SECRET` (SSE), receiving messages you send and feeding them into Claude;
+* When Claude wants to reply, the plugin calls `POST /relay/channel/out`:
 
----
+  * Normal reply: `{"type":"reply","text":"..."}`
+  * Poke: `{"type":"react","id":<target message id>,"emoji":"❤️"}` (empty emoji = retract this poke)
 
-## 6. 这版**有意砍掉**的东西（原系统里有，这里为通用性移除）
-
-| 功能 | 为什么砍 | 想加回来 |
-|---|---|---|
-| 私有上下文切换控制 | 依赖原系统的本地 daemon | 是个通用命令队列，可按需自建 |
-| 昨日时间线摘要注入 | 依赖私有记忆库 + 自配的小模型路由 | 接你自己的 LLM 路由即可 |
-| 抱抱垫 hug 事件 | 依赖 ESP32 硬件 | 有硬件再加一个端点 |
-| 体感 sense 上报 | 喂给私有调度心跳 | 同上 |
-| 记忆编辑器 cookie 鉴权 | 挂在另一个独立后端上 | 通常用不到 |
-
-它们都是**加法**，砍掉不影响核心聊天。需要时照着 §5 的端点风格补即可。
+If you don't use Claude Code, skip `channel/` and directly run `examples/bridge_any_llm.py` to connect to any OpenAI-compatible API. If you want a persistent API-based agent running on the VPS, use `examples/api_loop.py` and switch to `loop` through `/app/brain`. See `AGENTS.md` in the repository root and `examples/README.md` for the complete decision tree.
 
 ---
 
-## 7. 安全须知（务必看）
+## 6. Things Intentionally Removed from This Version
 
-- **`RELAY_SECRET` 是唯一的门**。它泄露 = 任何人都能读你们全部对话、冒充任意一方。`chmod 600 relay.env`，别提交进 git，别打印到对外日志。
-- **每个人用自己全新的密钥/VAPID/MiniMax key**，绝不要在朋友之间复用——复用密钥 = 互相能进对方的通道。
-- **HTTPS 不是可选项**：Service Worker 和 Web Push 在非 HTTPS 下根本不工作。
-- 这是**单用户**模型：一把密钥代表「就你和你的 AI」。它不做多租户，也不该暴露给不信任的人。
-- `relay.db`、`uploads/`、`*.pem`、`relay.env` 里全是你的私人内容/密钥——**备份时注意，开源/分享前务必排除**。
+| Feature                                 | Why it was removed                                                | How to add it back                                     |
+| --------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------ |
+| Private context switching control       | Depends on the original system's local daemon                     | It's a generic command queue; build your own as needed |
+| Previous-day timeline summary injection | Depends on a private memory database + custom small-model routing | Connect your own LLM router                            |
+| Hug event                               | Depends on ESP32 hardware                                         | Add another endpoint when you have the hardware        |
+| Sensor / `sense` reporting              | Feeds into a private scheduling heartbeat                         | Same as above                                          |
+| Memory editor cookie authentication     | Mounted on another independent backend                            | Usually unnecessary                                    |
+
+These are all **additive features**. Removing them does not affect core chat. When needed, add them back following the endpoint style described in §5.
 
 ---
 
-## 8. API 速查
+## 7. Security Notes (Must Read)
 
-| 方法 | 路径 | 谁用 | 作用 |
-|---|---|---|---|
-| GET | `/healthz` | — | 健康检查（免鉴权） |
-| GET | `/channel/in` | AI侧 | SSE：接收人类发来的消息 |
-| POST | `/channel/out` | AI侧 | 发回复 / 戳一戳 |
-| POST | `/app/send` | PWA | 人类发消息（含图片附件 id） |
-| GET | `/app/stream` | PWA | SSE：接收 AI 的消息 |
-| GET | `/app/history` | PWA | 拉历史（`?since=&limit=`） |
-| POST | `/app/upload` | PWA | 上传图片/文件，返回带签名路径的附件对象 |
-| GET | `/uploads/{name}` | PWA | 取附件（需鉴权） |
-| POST | `/app/voice` | PWA | 语音输入（浏览器转写文本 或 上传音频） |
-| POST | `/app/call` | PWA | 通话开始/结束事件 |
-| POST | `/app/tts` | PWA | 文字转语音（MiniMax，可选） |
-| POST | `/app/ping` | PWA | 前台心跳（在线状态） |
-| GET | `/app/status` | 调度 | 在线状态 + 最近消息元数据（不含正文） |
-| GET | `/app/vapid_public` | PWA | 取 VAPID 公钥用于订阅 |
-| POST | `/app/subscribe` · `/app/unsubscribe` | PWA | 开/关锁屏推送订阅 |
-| POST | `/app/push_test` | PWA | 推一条测试通知 |
+* **`RELAY_SECRET` is the only gate.** If it leaks, anyone can read your entire conversation history and impersonate either side. `chmod 600 relay.env`, don't commit it to git, and don't print it in externally visible logs.
+* **Each person must use their own fresh secret/VAPID/MiniMax key.** Never reuse them between friends—reusing keys means they can access each other's channels.
+* **HTTPS is not optional:** Service Workers and Web Push simply do not work over non-HTTPS connections.
+* This is a **single-user** model: one key represents “you and your AI.” It does not support multi-tenancy and should not be exposed to untrusted people.
+* `relay.db`, `uploads/`, `*.pem`, and `relay.env` all contain your private data/secrets—**be careful when backing them up, and always exclude them before open-sourcing or sharing the project**.
 
-所有端点（除 `/healthz`）都要 `Authorization: Bearer <RELAY_SECRET>`；SSE 端点也可用 `?token=<RELAY_SECRET>`。
+---
+
+## 8. API Quick Reference
+
+| Method | Path                                  | Used by   | Purpose                                                             |
+| ------ | ------------------------------------- | --------- | ------------------------------------------------------------------- |
+| GET    | `/healthz`                            | —         | Health check (no authentication required)                           |
+| GET    | `/channel/in`                         | AI side   | SSE: receive messages sent by the human                             |
+| POST   | `/channel/out`                        | AI side   | Send replies / poke                                                 |
+| POST   | `/app/send`                           | PWA       | Human sends a message (including image attachment IDs)              |
+| GET    | `/app/stream`                         | PWA       | SSE: receive AI messages                                            |
+| GET    | `/app/history`                        | PWA       | Fetch history (`?since=&limit=`)                                    |
+| POST   | `/app/upload`                         | PWA       | Upload images/files and return attachment objects with signed paths |
+| GET    | `/uploads/{name}`                     | PWA       | Retrieve an attachment (authentication required)                    |
+| POST   | `/app/voice`                          | PWA       | Voice input (browser transcription or audio upload)                 |
+| POST   | `/app/call`                           | PWA       | Call start/end events                                               |
+| POST   | `/app/tts`                            | PWA       | Text-to-speech (MiniMax, optional)                                  |
+| POST   | `/app/ping`                           | PWA       | Foreground heartbeat (online status)                                |
+| GET    | `/app/status`                         | Scheduler | Online status + recent message metadata (excluding message bodies)  |
+| GET    | `/app/vapid_public`                   | PWA       | Retrieve the VAPID public key for subscription                      |
+| POST   | `/app/subscribe` · `/app/unsubscribe` | PWA       | Enable/disable lock-screen push subscription                        |
+| POST   | `/app/push_test`                      | PWA       | Send a test notification                                            |
+
+All endpoints (except `/healthz`) require `Authorization: Bearer <RELAY_SECRET>`; SSE endpoints can also use `?token=<RELAY_SECRET>`.

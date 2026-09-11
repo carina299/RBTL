@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tidal_echo_postgres
+    environment:
+      POSTGRES_USER: tidal_echo
+      POSTGRES_PASSWORD: tidal_echo_password
+      POSTGRES_DB: tidal_echo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

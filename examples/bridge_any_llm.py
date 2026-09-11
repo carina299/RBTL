@@ -1,33 +1,38 @@
 #!/usr/bin/env python3
 """
-bridge_any_llm.py — 把「任意 LLM API」接到 companion relay 的 AI 侧 bridge。
+bridge_any_llm.py — a bridge that connects "any LLM API" to the AI side of the
+companion relay.
 
-这是 channel/ 插件(Claude Code 专用)的通用替代品:不依赖 Claude Code,
-用任何 OpenAI 兼容的模型(GPT / DeepSeek / Gemini / GLM / Kimi / 通义 / 本地
-vLLM …)当「AI 大脑」。前端 PWA 和 relay 后端原样不动。
+This is a generic replacement for the channel/ plugin (which is Claude Code
+only): it doesn't depend on Claude Code, and uses any OpenAI-compatible model
+(GPT / DeepSeek / Gemini / GLM / Kimi / Qwen / local vLLM …) as the "AI brain".
+The frontend PWA and the relay backend are untouched.
 
-它是个「带工具的聊天」循环,不是会自己乱跑的自主 agent —— 只在收到人类
-消息时动一次:
+It's a "chat with tools" loop, not an autonomous agent that runs off on its own —
+it acts once, only when a human message arrives:
 
-    ① SSE 长连  GET  {RELAY}/channel/in?since={cursor}   收人类消息(实时)
-    ② 用内存维护的近期对话 + persona(system),调你的模型(OpenAI 格式)
-    ③ POST       {RELAY}/channel/out  {"type":"reply","text":...}   回复回手机
+    (1) SSE long-poll  GET  {RELAY}/channel/in?since={cursor}   receive human messages (real time)
+    (2) with the in-memory recent conversation + persona (system), call your model (OpenAI format)
+    (3) POST           {RELAY}/channel/out  {"type":"reply","text":...}   reply back to the phone
 
-首次启动会拉一次历史做「暖启动」上下文,并把游标设到当前最新一条 —— 所以
-**不会回放/重答你过去的旧消息**,只应答启动之后的新消息。重启则从上次游标
-继续,补答断线期间漏掉的。
+On first start it pulls history once for "warm start" context and sets the cursor
+to the latest message — so it **does not replay / re-answer your old messages**,
+only new ones from after startup. On restart it continues from the last cursor,
+answering anything missed while disconnected.
 
-零第三方依赖(只用 Python 标准库,3.7+)。配置全走环境变量,可放在同目录
-.env(见 .env.example)。跑起来:
+Zero third-party dependencies (Python standard library only, 3.7+). All config is
+via environment variables, which can live in a .env next to this file (see
+.env.example). To run:
 
-    cp .env.example .env   &&   # 填好 RELAY_URL / RELAY_SECRET / LLM_* 三件
+    cp .env.example .env   &&   # fill in RELAY_URL / RELAY_SECRET / LLM_*
     python3 bridge_any_llm.py
 
-⚠️ 单身体原则:同一时刻只跑一个 AI 侧。别同时开着 Claude Code channel 和这个
-   bridge —— 两个都会收到同一条消息、都会回复,用户会看到双重回复。
+WARNING — single-body rule: run only one AI side at a time. Don't run the Claude
+   Code channel and this bridge together — both receive the same message and both
+   reply, and the user sees a double response.
 """
 
-from __future__ import annotations  # 让类型注解不在运行时求值,兼容 Python 3.7+
+from __future__ import annotations  # defer type-annotation evaluation, for Python 3.7+ compat
 
 import collections
 import json
@@ -39,11 +44,11 @@ import urllib.request
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# 配置(环境变量;也读同目录 .env)
+# config (environment variables; also reads a .env next to this file)
 # ---------------------------------------------------------------------------
 
 def _load_dotenv(path: Path) -> None:
-    """极简 .env 加载:KEY=VALUE 逐行;真实环境变量优先。"""
+    """Minimal .env loader: KEY=VALUE line by line; real environment variables win."""
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -56,14 +61,14 @@ def _load_dotenv(path: Path) -> None:
 
 _load_dotenv(Path(__file__).resolve().parent / ".env")
 
-RELAY_URL = os.environ.get("RELAY_URL", "").rstrip("/")          # 你的域名 + nginx /relay 前缀
-SECRET    = os.environ.get("RELAY_SECRET", "")                   # 必须和后端 relay.env 一致
-CHAT_ID   = os.environ.get("RELAY_CHAT_ID", "me")               # 单用户通道,固定 "me"
-HISTORY_N = int(os.environ.get("HISTORY_N", "12"))             # 喂给模型的最近对话「轮」数
+RELAY_URL = os.environ.get("RELAY_URL", "").rstrip("/")          # your domain + nginx /relay prefix
+SECRET    = os.environ.get("RELAY_SECRET", "")                   # must match the backend's relay.env
+CHAT_ID   = os.environ.get("RELAY_CHAT_ID", "me")               # single-user channel, always "me"
+HISTORY_N = int(os.environ.get("HISTORY_N", "12"))             # recent conversation "turns" fed to the model
 TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
 HTTP_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "120"))
 
-# persona = 模型的人设(system prompt)。从 PERSONA 文本或 PERSONA_FILE 文件读。
+# persona = the model's character (system prompt). Read from PERSONA text or a PERSONA_FILE.
 PERSONA = os.environ.get("PERSONA", "").strip()
 _persona_file = os.environ.get("PERSONA_FILE", "").strip()
 if not PERSONA and _persona_file:
@@ -72,9 +77,9 @@ if not PERSONA and _persona_file:
     except OSError:
         pass
 if not PERSONA:
-    PERSONA = "你是对方的 AI 伴侣,在一个私密的一对一聊天里。说话自然、简短、有温度,像在用手机聊天,不要长篇大论。"
+    PERSONA = "You are the user's AI companion, in a private one-on-one chat. Speak naturally, briefly, and warmly, like texting on a phone — no long monologues."
 
-# 模型链:主模型 + 可选兜底(LLM_*_2 / _3)。任一返回 FALLBACK_CODES 就顺次切下一个。
+# Model chain: primary model + optional fallbacks (LLM_*_2 / _3). Any FALLBACK_CODES response moves to the next.
 def _model_routes() -> list:
     routes = []
     for suffix in ("", "_2", "_3"):
@@ -88,12 +93,15 @@ def _model_routes() -> list:
 MODEL_ROUTES = _model_routes()
 FALLBACK_CODES = {401, 403, 404, 408, 409, 429, 500, 502, 503, 504}
 
-# 断线重连游标:只处理 id > cursor 的消息;重连带 ?since=cursor 让 relay 补发。
+# Reconnect cursor: only process messages with id > cursor; reconnect with
+# ?since=cursor so the relay resends what was missed.
 STATE_DIR = Path(os.environ.get("BRIDGE_STATE_DIR", Path.home() / ".companion-bridge"))
 CURSOR_FILE = STATE_DIR / "last_in_id"
 
-# 内存里的滚动对话上下文(避免依赖 relay 历史端点的分页语义 —— 它返回的是「最早」
-# 而非「最近」N 条)。收到的人类消息和自己发的回复都 append 进来,喂模型时取尾部。
+# In-memory rolling conversation context (avoids depending on the pagination
+# semantics of the relay's history endpoint — it returns the *earliest* N, not the
+# *latest*). Both received human messages and our own replies are appended; the
+# tail is fed to the model.
 convo: "collections.deque[dict]" = collections.deque(maxlen=max(HISTORY_N * 2, 8))
 
 
@@ -107,7 +115,7 @@ def _require_config() -> None:
     if not SECRET:    missing.append("RELAY_SECRET")
     if not MODEL_ROUTES: missing.append("LLM_API_BASE + LLM_API_KEY + LLM_MODEL")
     if missing:
-        log("fatal", "缺少配置: " + ", ".join(missing) + "  —— 填 .env(见 .env.example)再跑")
+        log("fatal", "missing config: " + ", ".join(missing) + "  — fill in .env (see .env.example) and rerun")
         sys.exit(1)
 
 
@@ -137,7 +145,7 @@ def relay_post_json(path: str, body: dict):
 
 
 def send_reply(text: str) -> None:
-    """AI 的回复 → 落库 + 扇出到 PWA。"""
+    """The AI's reply -> persisted + fanned out to the PWA."""
     out = relay_post_json("/channel/out", {
         "type": "reply", "chat_id": CHAT_ID, "text": text,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -146,24 +154,26 @@ def send_reply(text: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 历史 → 内存上下文
+# history -> in-memory context
 # ---------------------------------------------------------------------------
 
 def _row_to_msg(m: dict):
-    """把一条 relay 历史/消息转成 OpenAI message;不该进上下文的返回 None。"""
+    """Convert one relay history/message row to an OpenAI message; return None for
+    anything that shouldn't enter the context."""
     text = (m.get("text") or "").strip()
-    if not text or m.get("kind") == "call":         # 跳过通话开始/结束这类系统事件
+    if not text or m.get("kind") == "call":         # skip system events like call start/end
         return None
     if m.get("from") == "human":
-        return {"role": "user", "content": text}     # 含语音转写(🎤 …)
+        return {"role": "user", "content": text}     # includes voice transcripts (🎤 …)
     if m.get("from") == "ai" and m.get("kind") == "reply":
-        return {"role": "assistant", "content": text}  # 跳过 thinking/act 等中间态
+        return {"role": "assistant", "content": text}  # skip intermediate states like thinking/act
     return None
 
 
 def load_history() -> tuple:
-    """翻页拉全部历史 → (近期对话 messages, 最新一条的 id)。relay 的 history 是
-    `id > since ASC LIMIT`,所以从 0 往后翻页直到取完,再取尾部当上下文。"""
+    """Page through all history -> (recent conversation messages, id of the latest
+    row). The relay's history is `id > since ASC LIMIT`, so page forward from 0
+    until exhausted, then take the tail as context."""
     rows, since = [], 0
     while True:
         page = relay_get_json(f"/app/history?since={since}&limit=500").get("messages", [])
@@ -183,7 +193,7 @@ def build_messages() -> list:
 
 
 # ---------------------------------------------------------------------------
-# 调模型(OpenAI chat/completions;带 fallback 链)
+# call the model (OpenAI chat/completions; with a fallback chain)
 # ---------------------------------------------------------------------------
 
 def _one_call(route: dict, messages: list) -> str:
@@ -191,7 +201,8 @@ def _one_call(route: dict, messages: list) -> str:
         "model": route["model"],
         "messages": messages,
         "temperature": TEMPERATURE,
-        # 想接 function calling:在这里加 "tools": [...],处理返回里的 tool_calls,循环喂回(上限 ~8 步)。
+        # To add function calling: put "tools": [...] here, handle tool_calls in the
+        # response, and loop them back in (cap at ~8 steps).
     }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         route["base"] + "/chat/completions", data=body, method="POST",
@@ -210,29 +221,30 @@ def call_llm(messages: list) -> str:
         except urllib.error.HTTPError as e:
             last_err = e
             if e.code in FALLBACK_CODES:
-                log("llm", f"{route['model']} HTTP {e.code} → 切下一个")
+                log("llm", f"{route['model']} HTTP {e.code} → next route")
                 continue
             raise
         except (urllib.error.URLError, TimeoutError) as e:
             last_err = e
-            log("llm", f"{route['model']} 连接失败({e}) → 切下一个")
+            log("llm", f"{route['model']} connection failed ({e}) → next route")
             continue
-    raise RuntimeError(f"所有模型都失败,最后错误: {last_err}")
+    raise RuntimeError(f"all models failed, last error: {last_err}")
 
 
 # ---------------------------------------------------------------------------
-# 一条消息的处理
+# handling one message
 # ---------------------------------------------------------------------------
 
 def handle_human_message(msg: dict) -> None:
     content = (msg.get("content") or "").strip()
     atts = msg.get("attachments") or []
     if atts:
-        # 图片/附件:如需让多模态模型看图,在这里 GET {RELAY}/uploads/{name}?token={SECRET}
-        # 下载,再按你模型的格式(base64 / image_url)塞进最后一条 user message。
-        # 这个参考实现先降级成一行文字提示,保持简单。
+        # Images/attachments: to let a multimodal model see them, GET
+        # {RELAY}/uploads/{name}?token={SECRET} here to download, then put them
+        # into the last user message in your model's format (base64 / image_url).
+        # This reference implementation degrades to a one-line text note to stay simple.
         names = ", ".join(a.get("name") or "file" for a in atts)
-        content = (content + "\n" if content else "") + f"(对方发来 {len(atts)} 个附件: {names})"
+        content = (content + "\n" if content else "") + f"(the user sent {len(atts)} attachment(s): {names})"
     if not content:
         return
     log("in", f"#{msg.get('id')}: {content[:60]}")
@@ -240,7 +252,7 @@ def handle_human_message(msg: dict) -> None:
     try:
         reply = call_llm(build_messages())
     except Exception as e:
-        log("err", f"生成失败: {e}")
+        log("err", f"generation failed: {e}")
         return
     if reply:
         convo.append({"role": "assistant", "content": reply})
@@ -248,7 +260,7 @@ def handle_human_message(msg: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# SSE 入站流:GET /channel/in(断线自动重连)
+# SSE inbound stream: GET /channel/in (auto-reconnects on disconnect)
 # ---------------------------------------------------------------------------
 
 def read_cursor() -> int:
@@ -272,7 +284,8 @@ def stream_inbound(cursor: int) -> None:
         try:
             url = f"{RELAY_URL}/channel/in?since={cursor}"
             req = urllib.request.Request(url, headers={**_auth(), "Accept": "text/event-stream"})
-            # timeout 比 relay 的 15s 心跳 ping 长即可:超时=真的断了,跳到重连。
+            # timeout just needs to be longer than the relay's 15s heartbeat ping:
+            # a timeout means it really disconnected — go reconnect.
             with urllib.request.urlopen(req, timeout=90) as resp:
                 log("in", f"stream connected (since={cursor})")
                 backoff = 1
@@ -281,7 +294,7 @@ def stream_inbound(cursor: int) -> None:
                     line = raw.decode("utf-8", "replace").rstrip("\r\n")
                     if line.startswith("data:"):
                         data_lines.append(line[5:].lstrip())
-                    elif line == "":                      # 空行 = 一帧结束
+                    elif line == "":                      # blank line = end of a frame
                         if not data_lines:
                             continue
                         payload, data_lines = "\n".join(data_lines), []
@@ -292,11 +305,11 @@ def stream_inbound(cursor: int) -> None:
                         if m.get("type") == "ping" or "id" not in m:
                             continue
                         mid = int(m.get("id") or 0)
-                        if mid <= cursor:                 # 重连补发里已处理过的,跳过
+                        if mid <= cursor:                 # already handled in the resend, skip
                             continue
                         handle_human_message(m)
                         cursor = mid
-                        write_cursor(cursor)              # 只在处理后推进游标
+                        write_cursor(cursor)              # advance the cursor only after handling
             log("in", "stream ended → reconnect")
         except Exception as e:
             log("in", f"disconnected ({e}) → retry in {backoff}s")
@@ -308,7 +321,8 @@ def main() -> None:
     _require_config()
     log("boot", f"relay={RELAY_URL}  models={[r['model'] for r in MODEL_ROUTES]}  history={HISTORY_N}")
     cursor = read_cursor()
-    # 暖启动:拉历史填上下文,并把全新部署的游标设到「当前最新」——不回放/重答旧消息。
+    # Warm start: pull history to fill context, and for a brand-new deployment set
+    # the cursor to "current latest" — no replaying / re-answering old messages.
     try:
         ctx, max_id = load_history()
         convo.extend(ctx)

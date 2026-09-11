@@ -6,3 +6,9 @@ uvicorn==0.49.0
 httpx==0.28.1
 pywebpush==2.3.0
 py-vapid==1.9.4
+
+# --- Postgres / ORM / migrations (Part 1: DB refactor) ---
+SQLAlchemy==2.0.52
+alembic==1.19.1
+psycopg[binary]==3.3.5
+# pgvector==0.3.6   # add in Part 2 (memory embeddings)

@@ -1,58 +1,69 @@
-# examples/ — 接入示例
+# examples/ — Integration examples
 
-给**不用 Claude Code**、或需要无人值守跑的人。完整部署 SOP 见仓库根的 [`AGENTS.md`](../AGENTS.md)。
+For people who **aren't using Claude Code**, or who need to run this unattended.
+The full deployment SOP lives in [`AGENTS.md`](../AGENTS.md) at the repo root.
 
-| 文件 | 干什么 | 平台 |
+| File | What it does | Platform |
 |---|---|---|
-| [`bridge_any_llm.py`](bridge_any_llm.py) | 把任意 OpenAI 兼容模型(GPT/DeepSeek/Gemini/GLM/Kimi/通义/本地…)接成 AI 侧 | 任意 |
-| [`api_loop.py`](api_loop.py) | 服务器常驻 API 身体；配合 PWA 的 Desktop/API 开关、多窗口和流式输出 | Linux/VPS |
-| [`companion-api-loop.service`](companion-api-loop.service) | `api_loop.py` 的 systemd 模板 | Linux/VPS |
-| [`.env.example`](.env.example) | `bridge_any_llm.py` / `api_loop.py` 共用配置模板 | — |
-| [`confirm_dev_channel_win.py`](confirm_dev_channel_win.py) | Windows 上自动确认 Claude Code 的 DevChannelsDialog 弹框 | Windows |
+| [`bridge_any_llm.py`](bridge_any_llm.py) | Wires up any OpenAI-compatible model (GPT/DeepSeek/Gemini/GLM/Kimi/Qwen/local…) as the AI side | Any |
+| [`api_loop.py`](api_loop.py) | A server-resident API "body"; works with the PWA's Desktop/API switch, multi-window sessions, and streaming output | Linux/VPS |
+| [`companion-api-loop.service`](companion-api-loop.service) | systemd template for `api_loop.py` | Linux/VPS |
+| [`.env.example`](.env.example) | Shared config template for `bridge_any_llm.py` / `api_loop.py` | — |
+| [`confirm_dev_channel_win.py`](confirm_dev_channel_win.py) | Auto-confirms Claude Code's DevChannelsDialog popup on Windows | Windows |
 
 ---
 
-## 用任意 LLM 当大脑(bridge_any_llm.py)
+## Using any LLM as the brain (bridge_any_llm.py)
 
-它替代 `channel/` 插件,不依赖 Claude Code。原理是个三步薄循环:SSE 收
-`/channel/in` → 拉历史拼 messages + 调你的模型 → POST `/channel/out`。零第三方依赖。
+This replaces the `channel/` plugin and doesn't depend on Claude Code. It's a thin
+three-step loop: listen on SSE at `/channel/in` → pull history and assemble it into
+messages, then call your model → `POST` the result to `/channel/out`. Zero third-party
+dependencies.
 
 ```bash
 cd examples
 cp .env.example .env
-#  编辑 .env:填 RELAY_URL、RELAY_SECRET(和后端一致),以及你的模型三件套
-#  LLM_API_BASE / LLM_API_KEY / LLM_MODEL(各家取值见 .env.example 里的注释表)
+# Edit .env: fill in RELAY_URL, RELAY_SECRET (must match the backend), and your
+# model's three settings — LLM_API_BASE / LLM_API_KEY / LLM_MODEL (see the
+# comments in .env.example for values per provider)
 python3 bridge_any_llm.py
 ```
 
-跑起来后,在手机 PWA 发一条 → 终端打印 `[in] #.. ` → 模型生成 → 手机收到回复。
+Once it's running: send a message from the phone PWA → the terminal prints
+`[in] #..` → the model generates a reply → the phone receives it.
 
-- **换模型**只改 `.env` 的三件套,代码不动。Gemini 用它的 OpenAI 兼容端点即可。
-- **兜底链**:填 `LLM_*_2` / `LLM_*_3`,主模型 401/403/429/5xx 时自动顺次切。
-- **失忆?** 调大 `HISTORY_N`(默认喂最近 12 条)。
-- **看图**:默认把附件降级成文字提示;要真看图,在 `handle_human_message` 里下载
-  `/uploads/{name}?token=` 再按多模态格式喂(代码里有注释标位置)。
+- **Switching models** only requires changing the three settings in `.env` — no code
+  changes. Gemini works via its OpenAI-compatible endpoint.
+- **Fallback chain**: fill in `LLM_*_2` / `LLM_*_3` and it will automatically fail
+  over in order when the primary model returns 401/403/429/5xx.
+- **Forgetting context?** Increase `HISTORY_N` (defaults to feeding the last 12
+  messages).
+- **Seeing images**: by default, attachments are downgraded to a text placeholder.
+  To actually see images, download `/uploads/{name}?token=` inside
+  `handle_human_message` and feed it in using your model's multimodal format (the
+  insertion point is marked with a comment in the code).
 
 ---
 
-## 服务器 API 身体(api_loop.py)
+## Server-side API body (api_loop.py)
 
-它不是长连消费 `/channel/in`，而是一个本机 HTTP 服务：relay 的 `/app/brain` 切到
-`loop` 后，`/app/send` 会把新消息 POST 到 `/loop/ingest`。它支持：
+Instead of holding a long-lived connection consuming `/channel/in`, this runs as a
+local HTTP service: once the relay's `/app/brain` is switched to `loop`, `/app/send`
+POSTs new messages to `/loop/ingest`. It supports:
 
-- OpenAI-compatible 模型链和 fallback。
-- 读取 relay.db 里的同窗口近期上文。
-- PWA 多窗口 `api_session`。
-- `reply_delta` 流式草稿，完成后落正式 `reply`。
+- OpenAI-compatible model chains with fallback.
+- Reading recent context for the same window from `relay.db`.
+- The PWA's multi-window `api_session`.
+- `reply_delta` streaming drafts, finalized into a proper `reply` once complete.
 
 ```bash
 cd examples
 cp .env.example .env
-# 填 RELAY_URL / RELAY_SECRET / RELAY_DB / LLM_API_BASE / LLM_API_KEY / LLM_MODEL
+# Fill in RELAY_URL / RELAY_SECRET / RELAY_DB / LLM_API_BASE / LLM_API_KEY / LLM_MODEL
 python3 api_loop.py
 ```
 
-把 relay 切到它：
+Switch the relay over to it:
 
 ```bash
 curl -s -X POST http://127.0.0.1:3011/app/brain \
@@ -61,31 +72,37 @@ curl -s -X POST http://127.0.0.1:3011/app/brain \
   -d '{"target":"loop"}'
 ```
 
-要常驻就参考 [`companion-api-loop.service`](companion-api-loop.service)。
+For running it as a persistent service, see
+[`companion-api-loop.service`](companion-api-loop.service).
 
 ---
 
-## Claude Code 的确认框自动过(无人值守)
+## Auto-dismissing Claude Code's confirmation dialog (unattended runs)
 
-只有走 Claude Code 这条路才有这个框。**Linux/macOS 用 tmux 最干净:**
+This dialog only shows up on the Claude Code path. **On Linux/macOS, tmux is the
+cleanest approach:**
 
 ```bash
 tmux new-session -d -s cc 'claude --dangerously-load-development-channels server:companion'
-sleep 3 && tmux send-keys -t cc Enter        # 替你确认 DevChannelsDialog
+sleep 3 && tmux send-keys -t cc Enter        # confirms the DevChannelsDialog for you
 ```
 
-**Windows(无 tmux)** 用 [`confirm_dev_channel_win.py`](confirm_dev_channel_win.py):
+**On Windows (no tmux)**, use
+[`confirm_dev_channel_win.py`](confirm_dev_channel_win.py):
 
 ```bash
 python confirm_dev_channel_win.py -- claude --dangerously-load-development-channels server:companion
 ```
 
-细节(为什么躲不掉、覆盖范围)见 [`AGENTS.md` §4](../AGENTS.md)。
+For details (why this can't be avoided, and what it covers), see
+[`AGENTS.md` §4](../AGENTS.md).
 
 ---
 
-## ⚠️ 单身体原则
+## ⚠️ Single-body principle
 
-relay 是单用户单通道。**同一时刻只跑一个 AI 侧** —— 别同时开着 Claude Code channel
-和 `bridge_any_llm.py`。`api_loop.py` 由 relay 的 Desktop/API 开关控流，切到 `loop`
-时 Desktop channel 不会收到新消息；切回 `desktop` 时 API loop 仍可运行但不会接新入站。
+The relay is single-user, single-channel. **Only run one AI side at a time** — don't
+run the Claude Code channel and `bridge_any_llm.py` simultaneously. `api_loop.py` is
+gated by the relay's Desktop/API switch: when switched to `loop`, the Desktop channel
+won't receive new messages; when switched back to `desktop`, the API loop can keep
+running but won't take new inbound messages.

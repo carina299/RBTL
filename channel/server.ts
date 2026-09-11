@@ -48,7 +48,7 @@ const RELAY = (process.env.RELAY_URL ?? '').replace(/\/+$/, '')
 const SECRET = process.env.RELAY_SECRET ?? ''
 const SOURCE = process.env.RELAY_CHANNEL_NAME ?? 'companion' // <channel source="companion">
 const AI_NAME = process.env.RELAY_AI_NAME ?? 'AI'
-const HUMAN_NAME = process.env.RELAY_HUMAN_NAME ?? '对方'
+const HUMAN_NAME = process.env.RELAY_HUMAN_NAME ?? 'the user'
 const CHAT_ID = 'me' // single-user channel; constant id echoed back on reply
 const INBOUND_STALE_MS = 45000
 
@@ -136,7 +136,7 @@ const mcp = new Server(
       ``,
       `Their messages arrive as <channel source="${SOURCE}" chat_id="..." message_id="..." user="..." ts="...">. Reply with the reply tool, passing chat_id back. Use reply_to (a message_id) only when answering an earlier, specific message; for a normal reply to their latest message, omit reply_to.`,
       ``,
-      `They can attach photos and files. When they do, the <channel> block carries an image_path attribute and/or the content lists local paths like "[图片] <path>" or "[文件: name] <path>". Those are real files already downloaded to THIS machine — use the Read tool on each path to actually see the photo or open the file. Always Read an attached image before replying about it; never guess its contents.`,
+      `They can attach photos and files. When they do, the <channel> block carries an image_path attribute and/or the content lists local paths like "[image] <path>" or "[file: name] <path>". Those are real files already downloaded to THIS machine — use the Read tool on each path to actually see the photo or open the file. Always Read an attached image before replying about it; never guess its contents.`,
       ``,
       `This is a casual, personal channel — you decide what is worth sending. Short, frequent notes are fine. You are talking to ${HUMAN_NAME}, not performing for a transcript.`,
       ``,
@@ -218,7 +218,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       }
       case 'call': {
         const chat_id = (args.chat_id as string) || CHAT_ID
-        const text = (args.text as string) || `${AI_NAME}想和你语音通话。`
+        const text = (args.text as string) || `${AI_NAME} wants to have a voice call with you.`
         const out = await relayPost('/channel/out', {
           type: 'call',
           chat_id,
@@ -317,12 +317,12 @@ async function deliverInbound(msg: Record<string, unknown>): Promise<boolean> {
     }
     if (locals.length) {
       const lines = locals.map(l =>
-        l.kind === 'image' ? `[图片] ${l.path}` : `[文件: ${l.name}] ${l.path}`,
+        l.kind === 'image' ? `[image] ${l.path}` : `[file: ${l.name}] ${l.path}`,
       )
-      const header = `(${HUMAN_NAME}发来 ${locals.length} 个附件，已存到本机，用 Read 打开看)`
+      const header = `(${HUMAN_NAME} sent ${locals.length} attachment(s), saved to this machine — open them with Read)`
       content = (content ? content + '\n' : '') + header + '\n' + lines.join('\n')
     } else if (!content) {
-      content = `(${HUMAN_NAME}发来附件，但下载失败了)`
+      content = `(${HUMAN_NAME} sent an attachment, but the download failed)`
     }
   }
 

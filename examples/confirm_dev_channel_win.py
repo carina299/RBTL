@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 r"""
-confirm_dev_channel_win.py — Windows 上自动确认 Claude Code 的 DevChannelsDialog。
+confirm_dev_channel_win.py — auto-confirm Claude Code's DevChannelsDialog on Windows.
 
-只有走「Claude Code + channel/ 插件」这条路才需要。CC 用
+Only needed if you go the "Claude Code + channel/ plugin" route. When CC is
+started with
     claude --dangerously-load-development-channels server:companion
-启动时每次都会弹:
+it pops this every time:
 
     WARNING: Loading development channels
-      1. I am using this for local development   ← 默认高亮,按 Enter 即过
+      1. I am using this for local development   <- highlighted by default, press Enter to pass
       2. Exit
 
-自建本地 server: 频道进不了 channel allowlist(需 Team/Enterprise),这个框
-不吃 --dangerously-skip-permissions,也没有 env/settings 能静默它。无人值守
-(开机自启 / 自动重启)时会一直卡在这。
+For a self-hosted local server the channel can't get into the channel allowlist
+(that needs Team/Enterprise), this dialog ignores --dangerously-skip-permissions,
+and there's no env/setting that silences it. Unattended (autostart / auto-restart)
+it just hangs here forever.
 
-办法:启动 CC 后,往它的子控制台注入一个回车替它确认。原理是
-AttachConsole(pid) + CreateFileW("CONIN$") + WriteConsoleInputW。
+Workaround: after launching CC, inject one Enter into its child console to confirm
+for it. Mechanism: AttachConsole(pid) + CreateFileW("CONIN$") + WriteConsoleInputW.
 
-> Linux / macOS 别用这个 —— 用 tmux 更干净:
+> Don't use this on Linux / macOS — tmux is cleaner:
 >     tmux new-session -d -s cc 'claude --dangerously-load-development-channels server:companion'
 >     sleep 3 && tmux send-keys -t cc Enter
 
-用法(Windows):
-    # A. 当 launcher:开一个独立控制台跑 CC,并自动确认(适合无人值守)
+Usage (Windows):
+    # A. As a launcher: open a separate console running CC and auto-confirm (good for unattended)
     python confirm_dev_channel_win.py -- claude --dangerously-load-development-channels server:companion
 
-    # B. 对一个已经在跑的 CC 进程确认(适合从无控制台的服务/调度里调)
+    # B. Confirm an already-running CC process (good for calling from a console-less service/scheduler)
     python confirm_dev_channel_win.py --pid 12345
 """
 
@@ -35,7 +37,7 @@ import ctypes
 from ctypes import wintypes
 
 if sys.platform != "win32":
-    sys.exit("这个脚本只用于 Windows;Linux/macOS 请用 tmux send-keys(见文件头注释)。")
+    sys.exit("This script is Windows-only; on Linux/macOS use tmux send-keys (see the module docstring).")
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -74,9 +76,9 @@ class INPUT_RECORD(ctypes.Structure):
 
 
 def send_enter_to_console(pid: int) -> bool:
-    """往 pid 的控制台输入缓冲送一次回车(down+up)。成功返回 True。"""
-    kernel32.FreeConsole()                       # 先脱离自己的 console
-    if not kernel32.AttachConsole(pid):          # 接上目标进程的 console
+    """Send one Enter (down+up) to pid's console input buffer. Returns True on success."""
+    kernel32.FreeConsole()                       # detach from our own console first
+    if not kernel32.AttachConsole(pid):          # attach to the target process's console
         return False
     handle = INVALID_HANDLE_VALUE
     try:
@@ -85,7 +87,7 @@ def send_enter_to_console(pid: int) -> bool:
         if handle == INVALID_HANDLE_VALUE:
             return False
         recs = (INPUT_RECORD * 2)()
-        for i, down in enumerate((1, 0)):        # 一次完整按键 = 按下 + 抬起
+        for i, down in enumerate((1, 0)):        # one full keystroke = press + release
             recs[i].EventType = KEY_EVENT
             ke = recs[i].KeyEvent
             ke.bKeyDown = down
@@ -100,12 +102,14 @@ def send_enter_to_console(pid: int) -> bool:
     finally:
         if handle and handle != INVALID_HANDLE_VALUE:
             kernel32.CloseHandle(handle)
-        kernel32.FreeConsole()                   # 还回自己的 console
+        kernel32.FreeConsole()                   # give our own console back
 
 
 def auto_confirm(pid: int, window: int = 20, interval: int = 2) -> None:
-    """在 window 秒内每 interval 秒送一次回车;框渲染出来那一下即被读掉确认。
-    多送的空回车落在输入框无害。全程不抛错(送键失败最坏退回人工按一次)。"""
+    """Send Enter once every `interval` seconds for `window` seconds; the moment the
+    dialog renders, the queued Enter is consumed and confirms it. Extra blank
+    Enters landing in the input box are harmless. Never raises (worst case, a
+    failed keystroke just falls back to pressing Enter by hand once)."""
     deadline = time.time() + window
     sent = 0
     while time.time() < deadline:
@@ -124,7 +128,7 @@ def main(argv: list) -> int:
         auto_confirm(pid)
         return 0
 
-    # launcher 模式:-- 之后是要启动的命令
+    # launcher mode: everything after -- is the command to start
     if "--" in argv:
         cmd = argv[argv.index("--") + 1:]
     else:
@@ -135,7 +139,7 @@ def main(argv: list) -> int:
 
     import subprocess
     import threading
-    CREATE_NEW_CONSOLE = 0x00000010              # 给 CC 独立 console,便于干净地 Attach
+    CREATE_NEW_CONSOLE = 0x00000010              # give CC its own console so we can Attach cleanly
     proc = subprocess.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
     print(f"[devchan] launched pid={proc.pid}: {' '.join(cmd)}", file=sys.stderr, flush=True)
     threading.Thread(target=auto_confirm, args=(proc.pid,), daemon=True).start()

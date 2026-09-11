@@ -33,9 +33,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text as sa_text
+from sqlalchemy.orm import Session
+
+from database import engine, get_db, session_scope
+from repositories import MessageRepository, message_to_dict
 
 try:
     from pywebpush import webpush, WebPushException
@@ -47,7 +52,7 @@ except Exception:  # a missing lib must not stop the relay from starting
 
 # --- identity (parameterized — set these to your own names) ----------------
 AI_NAME = os.environ.get("RELAY_AI_NAME", "AI")          # AI companion's display name (push title, narration)
-HUMAN_NAME = os.environ.get("RELAY_HUMAN_NAME", "对方")   # how the AI is told about you in voice/call narration
+HUMAN_NAME = os.environ.get("RELAY_HUMAN_NAME", "the user")   # how the AI is told about you in voice/call narration
 
 # --- core config / secrets (all from env) ----------------------------------
 SECRET = os.environ.get("RELAY_SECRET", "")
@@ -107,20 +112,14 @@ def db() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    """SQLite bootstrap for the tables not yet on Postgres.
+
+    `messages` now lives in Postgres (schema owned by Alembic) — the storage
+    helpers below go through MessageRepository. Only `push_subscriptions` is
+    still SQLite; keep creating just that.
+    """
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     with db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS messages (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts        TEXT NOT NULL,
-                direction TEXT NOT NULL,   -- 'in' (human -> AI) | 'out' (AI -> human)
-                kind      TEXT NOT NULL,   -- 'user' | 'reply' | 'thinking' | 'voice' | 'call' | ...
-                text      TEXT NOT NULL,
-                meta      TEXT NOT NULL DEFAULT '{}'
-            )
-            """
-        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -136,91 +135,43 @@ def init_db() -> None:
         conn.commit()
 
 
+# --- message storage — Postgres via MessageRepository ----------------------
+# These stay sync and keep their original signatures so the endpoints below are
+# untouched. Async callers wrap them in `asyncio.to_thread(...)` so the blocking
+# query never stalls the event loop / SSE fan-out.
+
 def save_message(direction: str, kind: str, text: str, meta: dict) -> dict:
-    ts = meta.get("ts") or now_iso()
-    with db() as conn:
-        cur = conn.execute(
-            "INSERT INTO messages (ts, direction, kind, text, meta) VALUES (?,?,?,?,?)",
-            (ts, direction, kind, text, json.dumps(meta, ensure_ascii=False)),
-        )
-        conn.commit()
-        mid = cur.lastrowid
-    return {"id": mid, "ts": ts, "direction": direction, "kind": kind, "text": text, "meta": meta}
+    with session_scope() as s:
+        return message_to_dict(MessageRepository(s).create(direction, kind, text, meta))
 
 
 def set_reaction(message_id, who, emoji):
-    # Set/clear one party's reaction on an existing message.
-    # Returns the message's reactions dict, or None if the target doesn't exist.
-    with db() as conn:
-        row = conn.execute("SELECT meta FROM messages WHERE id = ?", (message_id,)).fetchone()
-        if not row:
-            return None
-        meta = json.loads(row["meta"] or "{}")
-        reactions = meta.get("reactions") or {}
-        if emoji:
-            reactions[who] = emoji
-        else:
-            reactions.pop(who, None)
-        if reactions:
-            meta["reactions"] = reactions
-        else:
-            meta.pop("reactions", None)
-        conn.execute(
-            "UPDATE messages SET meta = ? WHERE id = ?",
-            (json.dumps(meta, ensure_ascii=False), message_id),
-        )
-        conn.commit()
-    return reactions
+    """Set/clear one party's reaction. Returns the reactions dict, or None if the
+    target message doesn't exist."""
+    with session_scope() as s:
+        return MessageRepository(s).set_reaction(message_id, who, emoji)
 
 
 def history(since: int, limit: int) -> list:
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM messages WHERE id > ? ORDER BY id ASC LIMIT ?",
-            (since, limit),
-        ).fetchall()
-    return rows_to_messages(rows)
+    with session_scope() as s:
+        return [message_to_dict(m) for m in MessageRepository(s).list_since(since, limit)]
 
 
 def history_for_session(session_id: str, since: int, limit: int) -> list:
     session_id = (session_id or "").strip()
-    if not session_id:
-        return history(since, limit)
-    with db() as conn:
-        if session_id == "__legacy__":
-            rows = conn.execute(
-                "SELECT * FROM messages "
-                "WHERE id > ? AND (json_extract(meta, '$.api_session') IS NULL OR json_extract(meta, '$.api_session') = '') "
-                "ORDER BY id ASC LIMIT ?",
-                (since, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM messages "
-                "WHERE id > ? AND json_extract(meta, '$.api_session') = ? "
-                "ORDER BY id ASC LIMIT ?",
-                (since, session_id, limit),
-            ).fetchall()
-    return rows_to_messages(rows)
+    with session_scope() as s:
+        rows = MessageRepository(s).list_since(since, limit, session_id or None)
+        return [message_to_dict(m) for m in rows]
 
 
 def inbound_history(since: int, limit: int) -> list:
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM messages WHERE id > ? AND direction = 'in' ORDER BY id ASC LIMIT ?",
-            (since, limit),
-        ).fetchall()
-    return rows_to_messages(rows)
+    with session_scope() as s:
+        return [message_to_dict(m) for m in MessageRepository(s).inbound_since(since, limit)]
 
 
-def rows_to_messages(rows) -> list:
-    return [
-        {
-            "id": r["id"], "ts": r["ts"], "direction": r["direction"],
-            "kind": r["kind"], "text": r["text"], "meta": json.loads(r["meta"] or "{}"),
-        }
-        for r in rows
-    ]
+def max_message_id() -> int:
+    with session_scope() as s:
+        return MessageRepository(s).max_id()
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +259,7 @@ def notification_from_message(msg: dict) -> dict:
     if len(body) > PUSH_PREVIEW_CHARS:
         body = body[:PUSH_PREVIEW_CHARS].rstrip() + "…"
     if not body:
-        body = f"{AI_NAME}给你发来一条消息"
+        body = f"{AI_NAME} sent you a message"
     return {"title": AI_NAME, "body": body, "url": APP_PATH, "id": msg.get("id"), "ts": msg.get("ts")}
 
 
@@ -430,7 +381,7 @@ async def handle_stream_delta(kind: str, body: dict) -> dict:
     stream_drafts.pop(key, None)
     if not text:
         return {"ok": True, "stream_id": stream_id, "saved": False}
-    msg = save_message("out", base_kind, text, dict(draft.get("meta") or {}))
+    msg = await asyncio.to_thread(save_message, "out", base_kind, text, dict(draft.get("meta") or {}))
     await broadcast(app_subs, {"type": "typing", "active": False})
     await broadcast(app_subs, app_payload(msg))
     if base_kind == "reply" and not app_subs:
@@ -628,7 +579,14 @@ def check_auth(request: Request) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    init_db()  # SQLite tables for the endpoints not yet moved to Postgres
+    # Postgres schema is owned by Alembic (`alembic upgrade head`); just check
+    # the pool can connect so a misconfigured URL fails loudly at startup.
+    try:
+        with engine.connect() as conn:
+            conn.execute(sa_text("SELECT 1"))
+    except Exception as exc:
+        print(f"[db] WARNING: Postgres unreachable at startup: {type(exc).__name__}: {exc}")
     yield
 
 
@@ -652,7 +610,7 @@ async def healthz():
 async def channel_in(request: Request, since: int = 0, limit: int = 100):
     """SSE stream the plugin holds open. The human's messages get pushed down here."""
     check_auth(request)
-    backlog = [plugin_payload(m) for m in inbound_history(since, min(limit, 500))]
+    backlog = [plugin_payload(m) for m in await asyncio.to_thread(inbound_history, since, min(limit, 500))]
     return StreamingResponse(sse_stream(plugin_subs, request, backlog), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
@@ -672,7 +630,7 @@ async def channel_out(request: Request):
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="react: numeric id required")
         emoji = (body.get("emoji") or "").strip()
-        reactions = set_reaction(target_id, "ai", emoji)
+        reactions = await asyncio.to_thread(set_reaction, target_id, "ai", emoji)
         if reactions is None:
             raise HTTPException(status_code=404, detail="react: message not found")
         await broadcast(app_subs, {"type": "reaction", "id": target_id, "reactions": reactions, "by": "ai"})
@@ -682,7 +640,7 @@ async def channel_out(request: Request):
         return {"id": target_id, "reactions": reactions}
     text = body.get("text", "")
     meta = {k: v for k, v in body.items() if k not in ("type", "text")}
-    msg = save_message("out", kind, text, meta)
+    msg = await asyncio.to_thread(save_message, "out", kind, text, meta)
     # the AI replied — clear the typing state
     await broadcast(app_subs, {"type": "typing", "active": False})
     await broadcast(app_subs, app_payload(msg))
@@ -711,7 +669,7 @@ async def app_send(request: Request):
     meta = {"user": "human", "attachments": attachments}
     if api_session:
         meta["api_session"] = api_session
-    msg = save_message("in", "user", text, meta)
+    msg = await asyncio.to_thread(save_message, "in", "user", text, meta)
     # Route to exactly one AI body. "desktop" keeps the Claude Code channel;
     # "loop" calls the optional server-side API loop.
     if brain_target() == "loop":
@@ -759,7 +717,7 @@ async def app_voice(request: Request):
         if not transcript.startswith("🎤"):
             transcript = "🎤 " + transcript
         meta = {"user": "human", "voice": True, "source": body.get("source") or "browser_speech"}
-        msg = save_message("in", "voice", transcript, meta)
+        msg = await asyncio.to_thread(save_message, "in", "voice", transcript, meta)
         await broadcast(plugin_subs, plugin_payload(msg))
         await broadcast(app_subs, app_payload(msg))
         await broadcast(app_subs, {"type": "typing", "active": True})
@@ -776,7 +734,7 @@ async def app_voice(request: Request):
     stored = Path(upload["url"]).name
     local_audio = UPLOAD_DIR / stored
     transcript = transcribe_with_command(local_audio, mime)
-    text = ("🎤 " + transcript) if transcript else f"🎤 [语音] {HUMAN_NAME}发来一段语音；当前 relay 未配置 ASR，音频已作为附件送达。"
+    text = ("🎤 " + transcript) if transcript else f"🎤 [voice] {HUMAN_NAME} sent a voice message; this relay has no ASR configured, so the audio is attached as a file."
     meta = {
         "user": "human",
         "voice": True,
@@ -784,7 +742,7 @@ async def app_voice(request: Request):
         "attachments": [upload],
         "transcribed": bool(transcript),
     }
-    msg = save_message("in", "voice", text, meta)
+    msg = await asyncio.to_thread(save_message, "in", "voice", text, meta)
     await broadcast(plugin_subs, plugin_payload(msg))
     await broadcast(app_subs, app_payload(msg))
     await broadcast(app_subs, {"type": "typing", "active": True})
@@ -801,10 +759,10 @@ async def app_call(request: Request):
     if action not in {"start", "end"}:
         raise HTTPException(status_code=400, detail="invalid call action")
     if action == "start":
-        text = f"📞 [call_start] {HUMAN_NAME}开启了语音通话。接下来带 🎤 的消息来自语音。请用适合朗读的短句回复。"
+        text = f"📞 [call_start] {HUMAN_NAME} started a voice call. Messages marked 🎤 from now on are spoken. Reply in short, read-aloud-friendly sentences."
     else:
-        text = f"📞 [call_end] {HUMAN_NAME}结束了语音通话。"
-    msg = save_message("in", "call", text, {"user": "human", "call": action, "call_id": call_id})
+        text = f"📞 [call_end] {HUMAN_NAME} ended the voice call."
+    msg = await asyncio.to_thread(save_message, "in", "call", text, {"user": "human", "call": action, "call_id": call_id})
     if action == "end":
         await broadcast(plugin_subs, plugin_payload(msg))
     if action == "start":
@@ -847,13 +805,9 @@ def _presence_state(now):
 
 def latest_message():
     """Newest real conversational message (excludes 'thinking' stream)."""
-    with db() as conn:
-        row = conn.execute(
-            "SELECT * FROM messages WHERE kind != 'thinking' ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    if not row:
-        return None
-    return rows_to_messages([row])[0]
+    with session_scope() as s:
+        m = MessageRepository(s).latest_non_thinking()
+        return message_to_dict(m) if m else None
 
 
 @app.post("/app/ping")
@@ -871,7 +825,7 @@ async def app_status(request: Request):
     check_auth(request)
     now = datetime.now(timezone.utc)
     state, seen_age = _presence_state(now)
-    last_msg = latest_message()
+    last_msg = await asyncio.to_thread(latest_message)
     last_msg_ts = last_msg["ts"] if last_msg else None
     last_msg_dir = last_msg["direction"] if last_msg else None
     last_msg_age = None
@@ -895,11 +849,16 @@ async def app_status(request: Request):
     }
 
 
+# --- reference pattern: FastAPI <-> Postgres via a repository ----------------
+# Plain `def` (not `async def`): FastAPI runs it, and the get_db dependency, in a
+# threadpool, so the sync SQLAlchemy query never blocks the event loop.
 @app.get("/app/history")
-async def app_history(request: Request, since: int = 0, limit: int = 200, session_id: str = ""):
+def app_history(request: Request, since: int = 0, limit: int = 200,
+                session_id: str = "", db: Session = Depends(get_db)):
     check_auth(request)
-    rows = history_for_session(session_id, since, min(limit, 500)) if session_id else history(since, min(limit, 500))
-    return {"messages": [app_payload(m) for m in rows]}
+    repo = MessageRepository(db)
+    rows = repo.list_since(since, min(limit, 500), session_id or None)
+    return {"messages": [app_payload(message_to_dict(m)) for m in rows]}
 
 
 @app.get("/app/stream")
@@ -953,7 +912,7 @@ async def app_push_test(request: Request):
         body = await request.json()
     except Exception:
         body = {}
-    text = (body.get("text") if isinstance(body, dict) else None) or f"测试通知 · {AI_NAME}在这儿"
+    text = (body.get("text") if isinstance(body, dict) else None) or f"Test notification · {AI_NAME} is here"
     res = await push_to_all({"title": AI_NAME, "body": text, "url": APP_PATH, "id": 0})
     return {"ok": True, **res}
 
@@ -1001,9 +960,7 @@ async def app_sessions_create(request: Request):
     body = await request.json()
     if "since_id" not in body:
         try:
-            with db() as conn:
-                row = conn.execute("SELECT MAX(id) AS id FROM messages").fetchone()
-                body["since_id"] = int(row["id"] or 0)
+            body["since_id"] = await asyncio.to_thread(max_message_id)
         except Exception:
             body["since_id"] = 0
     return loop_json("/loop/sessions", method="POST", body=body)

@@ -55,7 +55,7 @@ self.addEventListener("push", (e) => {
   try { d = e.data ? e.data.json() : {}; }
   catch (_) { d = { body: (e.data && e.data.text && e.data.text()) || "" }; }
   const title = d.title || AI_NAME;                        // backend sends RELAY_AI_NAME as title
-  const body  = d.body  || "你有一条新消息";
+  const body  = d.body  || "You have a new message";
   const tag   = d.id ? ("companion-" + d.id) : "companion-msg";
   e.waitUntil(
     self.registration.showNotification(title, {
