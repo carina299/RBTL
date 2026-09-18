@@ -1,15 +1,140 @@
+# Local dev AND VPS deployment both use this file — for a VPS, put nginx (TLS +
+# reverse proxy, see backend/nginx-companion.conf.example) in front of the
+# `backend` (3011) and `web` (8080) ports it publishes on the host.
+#
+# Quick start:
+#   cp .env.example .env   # fill in RELAY_SECRET at least
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# The AI side (`channel/` — Claude Code, or examples/bridge_any_llm.py) is NOT
+# part of this stack in any mode: it always runs on your own machine and talks to
+# whichever relay you point RELAY_URL at (see channel/DEPLOY.md).
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: tidal_echo_postgres
+    container_name: rbtl_postgres
     environment:
-      POSTGRES_USER: tidal_echo
-      POSTGRES_PASSWORD: tidal_echo_password
-      POSTGRES_DB: tidal_echo
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-rbtl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rbtl_password}
+      POSTGRES_DB: ${POSTGRES_DB:-rbtl}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # host-local only; nothing outside this machine needs direct DB access
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rbtl}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: rbtl_redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"   # host-local only, same reasoning as postgres above
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # S3-compatible object storage for the album feature. Only
+  # actually used when STORAGE_BACKEND=minio (see .env); the default
+  # STORAGE_BACKEND=local just writes into the backend's own uploads/ dir, in
+  # which case this container starts but nothing talks to it.
+  minio:
+    # docker.io/minio/minio is blocked by this machine's registry mirror
+    # (403, not a network issue) — quay.io is MinIO's other official mirror.
+    image: quay.io/minio/minio:latest
+    container_name: rbtl_minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-rbtl_minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-rbtl_minio_password}
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"   # S3 API — also what MINIO_PUBLIC_ENDPOINT points browsers at
+      - "127.0.0.1:9001:9001"   # web console, handy for local debugging
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: rbtl_backend
+    env_file:
+      - .env
+    environment:
+      # Composed from the postgres/redis services above — keep POSTGRES_* in
+      # .env as the single source of truth rather than repeating the password
+      # here too.
+      RELAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-rbtl}:${POSTGRES_PASSWORD:-rbtl_password}@postgres:5432/${POSTGRES_DB:-rbtl}
+      REDIS_URL: redis://redis:6379/0
+      # MINIO_ENDPOINT is docker-internal (only reachable from other
+      # containers); MINIO_PUBLIC_ENDPOINT is what presigned URLs need to
+      # actually be reachable from — the phone/browser hitting :9000 on this
+      # host. On a VPS/cloud deploy, point MINIO_PUBLIC_ENDPOINT at your real
+      # public S3/R2/MinIO domain instead.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-minio}
+    ports:
+      - "3011:3011"
+    volumes:
+      - backend_data:/data   # relay.db (push_subscriptions) + uploads/ + brain_target — survives rebuilds
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Runs the long-term-memory extraction_graph (triggered by the backend —
+  # see app.py's MEMORY_EXTRACTION_ENABLED) and the daily reweight (on its
+  # own built-in beat schedule — `-B` below). Same image as `backend`,
+  # just a different process — no uvicorn, and it applies migrations itself
+  # since it can start before (or without) that service.
+  celery_worker:
+    build:
+      context: ./backend
+    container_name: rbtl_celery_worker
+    env_file:
+      - .env
+    environment:
+      RELAY_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-rbtl}:${POSTGRES_PASSWORD:-rbtl_password}@postgres:5432/${POSTGRES_DB:-rbtl}
+      REDIS_URL: redis://redis:6379/0
+    entrypoint: ["sh", "-c"]
+    command: ["alembic upgrade head && exec celery -A celery_app worker -B --loglevel=info"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    image: nginx:alpine
+    container_name: rbtl_web
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  redis_data:
+  backend_data:
+  minio_data:

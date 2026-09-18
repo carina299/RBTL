@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>Tidal Echo</title>
+<title>RBTL</title>
 
 <!-- PWA / iOS -->
 <link rel="manifest" href="manifest.webmanifest">
@@ -18,7 +18,7 @@
 <meta name="theme-color" content="#F4F4F5">
 <!-- iOS launch mode is manifest-only; legacy Apple fullscreen meta breaks bottom viewport. -->
 
-<meta name="apple-mobile-web-app-title" content="Tidal Echo">
+<meta name="apple-mobile-web-app-title" content="RBTL">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
 
@@ -111,7 +111,7 @@
     --call-hangup-bg: #cf8d92;
     --call-hangup-shadow: rgba(176,96,104,.34);
   }
-  /* ── HARBOR (generic open-source theme / Tidal Echo) ── neutral cool tone for forks; overrides only the hue variables, everything else inherits from PEARL TIDE */
+  /* ── HARBOR (generic open-source theme / RBTL) ── neutral cool tone for forks; overrides only the hue variables, everything else inherits from PEARL TIDE */
   :root[data-theme="harbor"]{
       --wall-default: var(--wall-harbor);
       --menu-wall-default: var(--menu-wall-harbor);
@@ -2065,7 +2065,7 @@
 
       <!-- hero -->
       <div class="menu-hero">
-        <h1 class="menu-title">Tidal Echo</h1>
+        <h1 class="menu-title">RBTL</h1>
         <p class="menu-since">since 2026/01/01</p>
         <div class="menu-days"><span class="num" id="menuDays">113</span><span class="lab">Days together</span></div>
       </div>
@@ -2220,7 +2220,7 @@
 
 <script>
 /* ════════════════════════════════════════════════════════════════
-   Tidal Echo — PWA chat shell (open source)
+   RBTL — PWA chat shell (open source)
    A private 1:1 chat front-end for a person and their AI companion,
    talking to a self-hosted relay backend. No domain or secret is baked in.
    Backend contract: GET /app/history · SSE /app/stream · POST /app/send · /healthz
@@ -2228,14 +2228,27 @@
 
 /* ── identity / branding — the ONE place to set names + app title ── */
 const CONFIG = {
-  APP_NAME:   "Tidal Echo",  // app + menu title (and manifest, set there too)
+  APP_NAME:   "RBTL",  // app + menu title (and manifest, set there too)
   AI_NAME:    "Claude",       // your AI companion's display name (header / call / push / narration)
   HUMAN_NAME: "你",           // how you're referred to in narration (rarely shown)
   SINCE:      "2026/01/01",   // "together since" date YYYY/MM/DD for the menu counter ("" hides it)
 };
 const AI_NAME = CONFIG.AI_NAME, HUMAN_NAME = CONFIG.HUMAN_NAME, APP_NAME = CONFIG.APP_NAME;
 
-const API_BASE = "http://127.0.0.1:3011";       // same-origin; nginx mounts the relay here (RELAY_PUBLIC_PREFIX)
+/* ── backend address — works across all three deployment modes with no build step ──
+   1. RELAY_URL set (non-empty)   -> use it verbatim. Set this when the frontend and
+      backend are on DIFFERENT origins, e.g. Vercel (this page) + Render (backend):
+        RELAY_URL: "https://your-backend.onrender.com"
+   2. RELAY_URL empty + localhost -> talk directly to the local backend on :3011
+      (local docker-compose / `python app.py` dev — no nginx in front here).
+   3. RELAY_URL empty + anywhere else -> same-origin relative "/relay" (VPS: nginx
+      reverse-proxies /relay/ to the backend on the same domain as this page). */
+const RELAY_URL = "";   // <- fill in for a split-origin (Vercel+Render) deploy; leave "" for local/VPS
+const API_BASE = RELAY_URL || (
+  /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+    ? `${location.protocol}//${location.hostname}:3011`
+    : "/relay"
+);
 const USE_MOCK  = false;          // true = self-contained demo with fake data (no backend needed)
 const LS_KEY    = "companion_secret";
 
@@ -3947,7 +3960,13 @@ function attImgError(img){
 function attUrl(u){
   if (!u) return "";
   if (/^blob:|^data:/.test(u)) return u;
-  return u + (u.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(secret || "");
+  // The backend returns attachment paths as root-relative ("/uploads/x.jpg" or
+  // "/relay/uploads/x.jpg" depending on RELAY_PUBLIC_PREFIX). On a VPS, API_BASE
+  // is same-origin-relative too, so the path already resolves correctly as-is. In
+  // local dev / a split-origin cloud deploy, API_BASE is an absolute URL for a
+  // different origin than this page — resolve the path against THAT origin.
+  const abs = /^https?:\/\//i.test(API_BASE) ? new URL(u, API_BASE).href : u;
+  return abs + (abs.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(secret || "");
 }
 function fmtSize(n){
   n = Number(n) || 0;

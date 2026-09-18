@@ -1,4 +1,4 @@
-/* Tidal Echo — service worker (offline shell + Web Push).
+/* RBTL — service worker (offline shell + Web Push).
    IMPORTANT: bump CACHE on every front-end change, or installed clients keep the
    old shell (the precached index.html won't refresh until the SW reinstalls). */
 const AI_NAME = "Claude";          // push-title fallback; keep in sync with index.html CONFIG.AI_NAME

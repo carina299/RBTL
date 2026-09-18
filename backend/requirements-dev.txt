@@ -1,0 +1,10 @@
+# Test-only deps, on top of requirements.txt. Not installed in the runtime
+# Docker image — install with `pip install -r requirements-dev.txt` locally.
+-r requirements.txt
+pytest==9.1.1
+
+# Only needed to actually select EMBEDDING_PROVIDER=local (a real local
+# embedding model via sentence-transformers) — every other provider and all
+# tests run fine without it. Pulls in torch, so it's opt-in rather than a
+# default install.
+# sentence-transformers==5.1.2

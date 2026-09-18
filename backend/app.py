@@ -40,7 +40,13 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from database import engine, get_db, session_scope
-from repositories import MessageRepository, message_to_dict
+from repositories import (
+    DEFAULT_USER_ID, AlbumRepository, AttachmentRepository, MemoryRepository, MessageRepository,
+    album_photo_dict, memory_to_dict, message_to_dict,
+)
+from album import create_album_photo
+from memory.retrieval_graph import run_retrieval
+from storage import MAX_UPLOAD_BYTES, clean_filename, ext_for, get_storage_backend, make_thumbnail, thumbnail_key_for
 
 try:
     from pywebpush import webpush, WebPushException
@@ -48,6 +54,14 @@ except Exception:  # a missing lib must not stop the relay from starting
     webpush = None
     class WebPushException(Exception):
         pass
+
+try:
+    # Optional: needs Celery/Redis configured (see docker-compose.yml's `redis`
+    # + `celery_worker` services). Local dev without them still boots the relay
+    # fine — memory extraction just stays disabled (see MEMORY_EXTRACTION_ENABLED).
+    from tasks import extract_memories_task
+except Exception:
+    extract_memories_task = None
 
 
 # --- identity (parameterized — set these to your own names) ----------------
@@ -64,7 +78,6 @@ APP_PATH = os.environ.get("RELAY_APP_PATH", "/")  # where a push-notification ta
 ALLOW_ORIGINS = [o.strip() for o in os.environ.get(
     "RELAY_ALLOW_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080"
 ).split(",") if o.strip()]
-MAX_UPLOAD_BYTES = int(os.environ.get("RELAY_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 VOICE_MAX_BYTES = int(os.environ.get("RELAY_VOICE_MAX_BYTES", str(8 * 1024 * 1024)))
 VOICE_TRANSCRIBE_CMD = os.environ.get("RELAY_VOICE_TRANSCRIBE_CMD", "")
 
@@ -140,9 +153,37 @@ def init_db() -> None:
 # untouched. Async callers wrap them in `asyncio.to_thread(...)` so the blocking
 # query never stalls the event loop / SSE fan-out.
 
+# --- long-term memory — background extraction trigger -----------------------
+# Fire-and-forget: every MEMORY_EXTRACTION_EVERY_N inbound human messages,
+# enqueue the LangGraph extraction task. The counter is in-memory, like
+# `stream_drafts` below — fine for this single-process, single-user relay; a
+# restart just resets the count, it never loses dialogue (extraction re-reads
+# from `messages`, it doesn't consume a queue).
+MEMORY_EXTRACTION_ENABLED = os.environ.get("MEMORY_EXTRACTION_ENABLED", "false").lower() == "true"
+MEMORY_EXTRACTION_EVERY_N = int(os.environ.get("MEMORY_EXTRACTION_EVERY_N", "20"))
+_inbound_since_extraction = 0
+
+
+def maybe_trigger_memory_extraction() -> None:
+    global _inbound_since_extraction
+    if not MEMORY_EXTRACTION_ENABLED or extract_memories_task is None:
+        return
+    _inbound_since_extraction += 1
+    if _inbound_since_extraction < MEMORY_EXTRACTION_EVERY_N:
+        return
+    _inbound_since_extraction = 0
+    try:
+        extract_memories_task.delay(DEFAULT_USER_ID)
+    except Exception as exc:
+        print(f"[memory] failed to enqueue extraction task: {type(exc).__name__}: {exc}")
+
+
 def save_message(direction: str, kind: str, text: str, meta: dict) -> dict:
     with session_scope() as s:
-        return message_to_dict(MessageRepository(s).create(direction, kind, text, meta))
+        msg = message_to_dict(MessageRepository(s).create(direction, kind, text, meta))
+    if direction == "in":
+        maybe_trigger_memory_extraction()
+    return msg
 
 
 def set_reaction(message_id, who, emoji):
@@ -416,23 +457,6 @@ def loop_json(path: str, method: str = "GET", body=None):
         raise HTTPException(status_code=502, detail=f"loop proxy error: {exc}")
 
 
-SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
-
-
-def clean_filename(name: str) -> str:
-    name = Path(name or "file").name
-    name = SAFE_NAME_RE.sub("_", name).strip("._") or "file"
-    return name[:80]
-
-
-def ext_for(name: str, mime: str) -> str:
-    ext = Path(name).suffix.lower()
-    if ext and re.fullmatch(r"\.[A-Za-z0-9]{1,8}", ext):
-        return ext
-    guessed = mimetypes.guess_extension((mime or "").split(";", 1)[0].strip())
-    return guessed or ".bin"
-
-
 def save_upload_bytes(data: bytes, name: str, mime: str, prefix: str = "att") -> dict:
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
@@ -605,6 +629,17 @@ async def healthz():
 
 
 # ---- AI side ---------------------------------------------------------------
+
+@app.get("/channel/status")
+def channel_status(request: Request):
+    """Lets the channel plugin sanity-check its local cursor against what the
+    backend actually has (e.g. after the DB was reset/reseeded independently of
+    the plugin's ~/.claude/channels/companion/last_in_id) — if its cursor is
+    ahead of max_id, that cursor can only be stale, so it should reset to 0
+    rather than silently filtering out every message as "already seen"."""
+    check_auth(request)
+    return {"max_id": max_message_id()}
+
 
 @app.get("/channel/in")
 async def channel_in(request: Request, since: int = 0, limit: int = 100):
@@ -866,6 +901,144 @@ async def app_stream(request: Request):
     """SSE stream the PWA holds open while foregrounded. The AI's messages arrive here."""
     check_auth(request)
     return StreamingResponse(sse_stream(app_subs, request), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+# --- long-term memory — debug/admin endpoints --------------------------------
+# The real retrieval path the agent uses is the memory_search/memory_remember
+# MCP tools (mcp_server.py), not these — these exist for manual testing and
+# housekeeping. The REST endpoint is kept as an internal debug/admin route;
+# the real conversation path goes through the MCP tools.
+
+@app.get("/memory/retrieve")
+def memory_retrieve(request: Request, query: str, top_k: int = 6, db: Session = Depends(get_db)):
+    check_auth(request)
+    results = run_retrieval(db, DEFAULT_USER_ID, query, top_k=min(top_k, 30))
+    db.commit()  # run_retrieval bumps access_count/last_accessed_at on hits — that's a write
+    return {"results": results}
+
+
+@app.get("/memory/list")
+def memory_list(request: Request, memory_type: str = "", limit: int = 100, db: Session = Depends(get_db)):
+    check_auth(request)
+    repo = MemoryRepository(db)
+    rows = repo.list_active(DEFAULT_USER_ID, memory_type or None, min(limit, 500))
+    return {"memories": [memory_to_dict(m) for m in rows]}
+
+
+@app.delete("/memory/{memory_id}")
+def memory_delete(request: Request, memory_id: int, db: Session = Depends(get_db)):
+    check_auth(request)
+    ok = MemoryRepository(db).soft_delete(memory_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="memory not found")
+    db.commit()  # get_db only guarantees cleanup, not commit — this is a write
+    return {"ok": True}
+
+
+# --- Album ---------------------------------------------------------------
+
+def _album_photo_url(entry, att_repo: AttachmentRepository) -> str | None:
+    """Proxied through this backend's own /app/album/file/{key} — deliberately
+    NOT `storage.url_for()`'s direct presigned MinIO URL. `web/album.html`'s
+    own `imgUrl()` unconditionally appends `&token=<secret>` to every image
+    URL it renders (that's how it authenticates the local-storage backend's
+    `/uploads/{name}`) — but AWS SigV4 signs the entire query string, so an
+    unsigned param tacked on afterward invalidates the signature and MinIO
+    403s (confirmed live: worked in every curl/automated test, 403'd the
+    moment a real browser rendered it through that function; pre-signing
+    with the token already included doesn't help either — the frontend still
+    appends its own copy on top, and a duplicated param doesn't match what
+    was signed). Proxying keeps the same check_auth()+`?token=` pattern
+    working for both storage backends, at the cost of the bytes round-tripping
+    through this process instead of going straight from MinIO to the browser.
+    """
+    atts = att_repo.get_many(entry.attachment_ids)
+    if not atts:
+        return None
+    prefix = PUBLIC_PREFIX or ""
+    return f"{prefix}/app/album/file/{atts[0].storage_key}"
+
+
+def _create_album_photo(data: bytes, name: str, mime: str, caption: str, time_label: str, group_name: str) -> dict:
+    """Blocking: storage I/O + thumbnailing + two DB writes (Attachment,
+    AlbumEntry) in one transaction. Run via `asyncio.to_thread` from the
+    route, same as `save_message` elsewhere. Returns `{"id": <entry id>}` —
+    all the frontend needs to immediately open the detail view.
+    """
+    try:
+        with session_scope() as s:
+            entry = create_album_photo(s, DEFAULT_USER_ID, data, name, mime, caption, time_label, group_name)
+            entry_id = entry.id
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+    return {"id": entry_id}
+
+
+@app.post("/app/album/upload")
+async def album_upload(request: Request, name: str = "file", caption: str = "", time: str = "", group: str = ""):
+    check_auth(request)
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+    mime = request.headers.get("content-type", "application/octet-stream")
+    return await asyncio.to_thread(_create_album_photo, data, name, mime, caption, time, group)
+
+
+@app.get("/app/album/list")
+def album_list(request: Request, db: Session = Depends(get_db)):
+    check_auth(request)
+    repo = AlbumRepository(db)
+    att_repo = AttachmentRepository(db)
+    backend = get_storage_backend()
+    entries = repo.list_timeline(DEFAULT_USER_ID, cursor=None, limit=500)
+    return {"photos": [album_photo_dict(e, _album_photo_url(e, att_repo)) for e in entries]}
+
+
+@app.get("/app/album/photo/{entry_id}")
+def album_photo_detail(request: Request, entry_id: int, db: Session = Depends(get_db)):
+    check_auth(request)
+    repo = AlbumRepository(db)
+    entry = repo.get(entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="photo not found")
+    repo.increment_views(entry_id)
+    db.commit()  # get_db only guarantees cleanup, not commit — this is a write
+    d = album_photo_dict(entry, _album_photo_url(entry, AttachmentRepository(db)))
+    d["views"] += 1  # reflect the bump we just made without a second round-trip
+    d["notes_list"] = entry.notes or []
+    return d
+
+
+@app.get("/app/album/random")
+def album_random(request: Request, db: Session = Depends(get_db)):
+    check_auth(request)
+    repo = AlbumRepository(db)
+    entry = repo.random_entry(DEFAULT_USER_ID)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="album is empty")
+    repo.increment_views(entry.id)
+    db.commit()
+    d = album_photo_dict(entry, _album_photo_url(entry, AttachmentRepository(db)))
+    d["views"] += 1
+    d["notes_list"] = entry.notes or []
+    return d
+
+
+@app.get("/app/album/file/{key}")
+def album_file(request: Request, key: str):
+    """Serves the bytes for `_album_photo_url()`'s proxied URLs — see that
+    function's docstring for why this isn't a direct presigned MinIO link.
+    Auth via `check_auth` (so the frontend's `?token=` works, same as
+    `/uploads/{name}`); the storage backend (local disk or MinIO) is an
+    implementation detail the client never needs to know about.
+    """
+    check_auth(request)
+    try:
+        data = get_storage_backend().read(clean_filename(key))
+    except Exception:
+        raise HTTPException(status_code=404, detail="file not found")
+    mime = mimetypes.guess_type(key)[0] or "application/octet-stream"
+    return Response(content=data, media_type=mime)
 
 
 # ---- web push subscription management --------------------------------------

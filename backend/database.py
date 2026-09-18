@@ -19,7 +19,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATABASE_URL = os.environ.get(
     "RELAY_DATABASE_URL",
-    "postgresql+psycopg://tidal_echo:tidal_echo_password@localhost:5432/tidal_echo",
+    "postgresql+psycopg://rbtl:rbtl_password@localhost:5432/rbtl",
 )
 
 engine = create_engine(

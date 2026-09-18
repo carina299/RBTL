@@ -1,0 +1,57 @@
+# Render Blueprint — deploys the backend as a persistent web service (SSE-friendly,
+# unlike a serverless function) + a managed Postgres.
+#
+# Use it:
+#   1. Push this repo to GitHub.
+#   2. Render dashboard -> New -> Blueprint -> pick the repo -> Apply.
+#      (Or without a Blueprint: New -> Web Service -> Docker -> Root Directory =
+#      "backend", plus a separate New -> PostgreSQL, and set the env vars below
+#      by hand.)
+#   3. After the frontend is deployed (Vercel), come back and set RELAY_ALLOW_ORIGINS
+#      to its real URL, and set the frontend's RELAY_URL to this service's URL.
+#
+# The AI side (channel/ or examples/bridge_any_llm.py) is NOT part of this
+# blueprint — it always runs on your own machine, pointed at this service's URL.
+
+databases:
+  - name: rbtl-db
+    plan: free
+    databaseName: rbtl
+    user: rbtl
+
+services:
+  - type: web
+    name: rbtl-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: RELAY_SECRET
+        generateValue: true   # Render generates a strong random secret; copy it into the PWA login + channel/.env
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rbtl-db
+          property: connectionString
+      - key: RELAY_AI_NAME
+        value: Claude
+      - key: RELAY_HUMAN_NAME
+        value: Your Name
+      - key: RELAY_PUBLIC_PREFIX
+        value: ""   # no nginx in front on Render — must stay empty, see backend/.env.example
+      - key: RELAY_APP_PATH
+        value: https://your-project.vercel.app/   # <- replace after deploying the frontend (where a push tap should open)
+      - key: RELAY_ALLOW_ORIGINS
+        value: https://your-project.vercel.app   # <- replace after deploying the frontend
+      - key: RELAY_MAX_UPLOAD_BYTES
+        value: "10485760"
+      - key: RELAY_VOICE_MAX_BYTES
+        value: "8388608"
+    # Uploaded files (images/voice) live on local disk and are EPHEMERAL on Render's
+    # free plan — they vanish on every redeploy/restart. Uncomment on a paid plan
+    # that supports persistent disks if you need uploads to survive:
+    # disk:
+    #   name: rbtl-data
+    #   mountPath: /data
+    #   sizeGB: 1

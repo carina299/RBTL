@@ -11,4 +11,20 @@ py-vapid==1.9.4
 SQLAlchemy==2.0.52
 alembic==1.19.1
 psycopg[binary]==3.3.5
-# pgvector==0.3.6   # add in Part 2 (memory embeddings)
+pgvector==0.3.6
+numpy==2.5.3
+
+# --- Long-term memory: LangGraph orchestration + Celery/Redis trigger (Part 2) ---
+# LLM extraction (Claude) and embeddings (OpenAI) are called directly over HTTP via
+# httpx above, same pattern as the existing MiniMax TTS call in app.py — no extra
+# SDK needed for either.
+langgraph==1.2.11
+celery==5.6.3
+redis==8.1.0
+# Pinned <2: mcp 2.x renamed FastMCP to MCPServer with a different API; the
+# decorator-based FastMCP style (mcp_server.py) is the simpler fit here.
+mcp==1.30.0
+
+# --- Album (Part 3): object storage + thumbnails ---
+Pillow==12.3.0
+minio==7.2.20

@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "companion": {
+      "command": "bun",
+      "args": [
+        "run",
+        "--cwd",
+        "./channel",
+        "--silent",
+        "start"
+      ]
+    },
+    "memory": {
+      "command": "/absolute/path/to/backend/venv/bin/python3",
+      "args": [
+        "/absolute/path/to/backend/mcp_server.py"
+      ],
+      "env": {
+        "RELAY_DATABASE_URL": "postgresql+psycopg://rbtl:<password>@localhost:5432/rbtl",
+        "EMBEDDING_PROVIDER": "local_hash"
+      }
+    }
+  }
+}

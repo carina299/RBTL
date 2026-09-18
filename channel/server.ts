@@ -95,6 +95,12 @@ async function relayPost(path: string, body: unknown): Promise<Record<string, un
   }
 }
 
+async function relayGet(path: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${RELAY}${path}`, { headers: { Authorization: `Bearer ${SECRET}` } })
+  if (!res.ok) throw new Error(`relay ${path} → HTTP ${res.status}`)
+  return res.json()
+}
+
 function readNumberFile(path: string): number {
   try {
     return Number(readFileSync(path, 'utf8').trim()) || 0
@@ -115,6 +121,28 @@ function advanceInId(id: number): void {
   if (id > lastInId) {
     lastInId = id
     writeNumberFile(IN_LAST_FILE, id)
+  }
+}
+
+// Our cursor can only ever be < the relay's current max message id (advanceInId
+// never sets it past a real message). If it's AHEAD, the relay's DB was reset or
+// swapped out from under us — every message would then get misread as "already
+// seen" and silently dropped, forever. Detect that and drop back to 0 (deliver
+// everything currently in the DB) rather than requiring a manual cursor reset.
+async function resyncCursor(): Promise<void> {
+  if (lastInId === 0) return
+  try {
+    const status = await relayGet('/channel/status')
+    const maxId = Number(status.max_id) || 0
+    if (lastInId > maxId) {
+      tlog('in', `cursor ${lastInId} is ahead of relay's max id ${maxId} (DB reset?) — resetting to 0`)
+      lastInId = 0
+      writeNumberFile(IN_LAST_FILE, 0)
+    }
+  } catch (err) {
+    // Best-effort: an older relay without /channel/status, or a transient
+    // network hiccup, shouldn't block the actual inbound connection below.
+    tlog('in', `cursor sanity check skipped (${err})`)
   }
 }
 
@@ -387,6 +415,7 @@ async function streamInbound(): Promise<void> {
       }, 10000)
       let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
       try {
+        await resyncCursor()
         const res = await fetch(`${RELAY}/channel/in?since=${lastInId}`, {
           headers: { Authorization: `Bearer ${SECRET}`, Accept: 'text/event-stream' },
           signal: streamAbort.signal,

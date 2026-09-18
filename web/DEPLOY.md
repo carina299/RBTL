@@ -1,10 +1,13 @@
-# Tidal Echo · Frontend PWA Deployment Guide
+# RBTL · Frontend PWA Deployment Guide
 
 The mobile side—once you **“Add to Home Screen,”** it becomes a standalone private chat app, communicating with your AI companion on your computer (Claude Code + channel plugin) through your own relay backend.
 
 > This is a reusable frontend extracted from a private AI companion system and **fully sanitized**. No domains, keys, or private names are hardcoded in the code—names are configured through `CONFIG`, and the address uses a relative path + your nginx prefix.
 
 Purely static: one `index.html` (with all CSS/JS included, no build step), one `sw.js`, one `manifest.webmanifest`, and several theme images. Drop it into nginx and it works.
+
+> Deploying to Vercel instead of nginx (split-origin, with the backend on Render)?
+> See [`../DEPLOY.md`](../DEPLOY.md) §3 — same files, one extra config line.
 
 ---
 
@@ -36,7 +39,7 @@ Open `index.html`. At the top `<script>` there is the **only configuration block
 
 ```js
 const CONFIG = {
-  APP_NAME:   "Tidal Echo",  // App / menu title (also change it in the manifest, see below)
+  APP_NAME:   "RBTL",  // App / menu title (also change it in the manifest, see below)
   AI_NAME:    "Claude",       // Display name of your AI companion (top bar / calls / notifications / narration)
   HUMAN_NAME: "You",          // How to refer to you in narration (rarely shown)
   SINCE:      "2026/01/01",   // Starting date for "days together" on the menu page, YYYY/MM/DD (leave "" to hide the counter)
@@ -47,7 +50,11 @@ const CONFIG = {
 * Users can still change the displayed name locally on the “Profile” page; it is stored on the device and does not affect anyone else.
 * To change the App name: also change `name` / `short_name` in `manifest.webmanifest`, and `AI_NAME` at the top of `sw.js` (fallback notification title).
 
-**Path**: `const API_BASE = "/relay"` — same-origin relative path, corresponding to the backend's `RELAY_PUBLIC_PREFIX`. If you mount the API under a different prefix, change it here (do not hardcode the domain).
+**Backend address**: `const RELAY_URL = ""` (just below `CONFIG`) — leave it empty
+for nginx/VPS (same-origin `/relay`, auto-detected) or local dev (auto-detects
+`:3011`). Set it to an absolute URL only when the frontend and backend are on
+**different origins** — i.e. this file on Vercel talking to a backend on Render.
+See the comment above it in `index.html` for the full resolution order.
 
 **Avatar / icons**: `avatar-sea.png` is the default avatar (abstract ocean surface; users can change it in the App); `icon-192/512.png`, `apple-touch-icon.png`, and `favicon.png` are placeholder “tide” icons. Replace them with your own files using the same filenames.
 
@@ -107,13 +114,12 @@ After configuring VAPID on the backend (see `../backend/DEPLOY.md` §4), enable 
 
 ## 7. Placeholders / intentionally empty features
 
-To match the “core chat” backend, the following are **placeholder buttons**. Clicking them only shows a toast or example data; they are not connected to the backend. They are kept so you can use them as a reference when connecting your own features:
+The following are still **placeholder buttons**. Clicking them only shows a toast or example data; they are not connected to the backend. They are kept so you can use them as a reference when connecting your own features:
 
-* Menu page: Movie / Memory / Tides / Room
+* Menu page: Movie / Memory / Tides / Room — note "Memory" here is just this menu placeholder, unrelated to the backend's actual long-term memory system (that one has no dedicated PWA screen; it's agent-facing only — see `backend/DEPLOY.md` §5)
 * Settings page: model selection / effort / context threshold / reset / swap / status (displays example numbers)
-* **Album** `album.html`: complete album UI shell. The file header specifies the `/relay/app/album/*` endpoints you need to implement yourself; without a backend connection, it displays a key gate / empty state.
 
-Core chat features (text / images / voice / calls / poke / push notifications) are connected to the backend.
+Core chat features (text / images / voice / calls / poke / push notifications) and the **album** (`album.html`) are connected to the backend — see `backend/DEPLOY.md` §6 for the `STORAGE_BACKEND`/MinIO config the `/relay/app/album/*` endpoints it calls need.
 
 ---
 

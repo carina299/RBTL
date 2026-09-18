@@ -10,6 +10,11 @@ over plain HTTPS to your own relay backend. One end speaks CC's channel mechanis
 > at `https://your-domain/relay` (see `../backend/DEPLOY.md`). Get the backend's smoke
 > test passing before wiring up the plugin.
 >
+> **This always runs on your own machine**, no matter which of the three modes in
+> [`../DEPLOY.md`](../DEPLOY.md) the *backend* is deployed with (local Docker, a
+> VPS, or Render) — only `RELAY_URL` in `.env` below changes to point at it.
+> There's no "deploying the AI side" to a server.
+>
 > The runtime requires **[Bun](https://bun.sh)**
 > (`curl -fsSL https://bun.sh/install | bash`; see the official site for Windows).
 > The MCP SDK is installed automatically by Bun on the first `start`.
@@ -56,8 +61,13 @@ RELAY_HUMAN_NAME=your name
 
 ## 3. Register it in .mcp.json
 
-Add a `companion` entry to the `mcpServers` section of the `.mcp.json` you use for
-this AI:
+The repo root has [`.mcp.json.example`](../.mcp.json.example) — `cp .mcp.json.example
+.mcp.json` gives you a `companion` entry (and a `memory` one for
+`../backend/mcp_server.py`, see `../backend/DEPLOY.md` §5.4) ready to edit.
+`.mcp.json` itself is gitignored since it ends up holding real paths/credentials.
+
+Or add the `companion` entry by hand to the `mcpServers` section of the
+`.mcp.json` you use for this AI:
 
 ```json
 {

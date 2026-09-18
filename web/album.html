@@ -396,17 +396,22 @@ button{ font:inherit; color:inherit; cursor:pointer; border:none; background:non
 
 <script>
 /* ─────────────────────────────────────────────────────────────
-   Album — a reusable photo-gallery SHELL.
-   The relay backend in this repo does NOT implement album endpoints.
-   To use it, wire these on your own backend (all Bearer-authed like the rest):
+   Album — photo gallery backed by the relay's own album endpoints
+   (all Bearer-authed like the rest; see backend/DEPLOY.md §6 for the
+   STORAGE_BACKEND/MinIO config they need):
      GET  /relay/app/album/list             → { photos: [{id, img, caption, time, group, views, ...}] }
      GET  /relay/app/album/photo/{id}       → one photo (+ notes_list)
      GET  /relay/app/album/random           → one random photo
      POST /relay/app/album/upload?name=&caption=&time=&group=  (raw image body)
-     POST /relay/app/trace                  → optional analytics (safe to ignore)
-   Until then the gallery shows the key gate / empty state.
+   Without a backend connection (no key, or the relay unreachable) it falls
+   back to the key gate / empty state.
    ───────────────────────────────────────────────────────────── */
-const API_BASE="/relay";
+/* Same RELAY_URL / API_BASE convention as index.html — see the comment there.
+   Fill in RELAY_URL for a split-origin (Vercel+Render) deploy; leave "" for local/VPS. */
+const RELAY_URL="";
+const API_BASE = RELAY_URL || (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+  ? `${location.protocol}//${location.hostname}:3011`
+  : "/relay");
 const LS_KEY="companion_secret";
 let secret=localStorage.getItem(LS_KEY)||"";
 
@@ -442,7 +447,11 @@ let filterGroup="", filterText="";
 
 function imgUrl(p){
   const u=(p&&p.img)?p.img:""; if(!u) return "";
-  return u+(u.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(secret);
+  // See attUrl() in index.html: resolve against API_BASE's origin when it's
+  // absolute (local dev / split-origin cloud deploy), else the path is already
+  // same-origin-correct (VPS, nginx-proxied).
+  const abs = /^https?:\/\//i.test(API_BASE) ? new URL(u, API_BASE).href : u;
+  return abs+(abs.indexOf("?")>=0?"&":"?")+"token="+encodeURIComponent(secret);
 }
 function authHeaders(extra){ return Object.assign({"Authorization":"Bearer "+secret}, extra||{}); }
 function trace(kind, fields){
@@ -618,6 +627,15 @@ function closeUpload(){ $("uploadModal").classList.add("hidden"); }
 $("fileInput").addEventListener("change",()=>{
   const f=$("fileInput").files[0]; const pv=$("preview");
   if(f){ pv.src=URL.createObjectURL(f); pv.classList.remove("hidden"); } else pv.classList.add("hidden");
+});
+/* tabbing into (or clicking) the date field fills today's date if it's still
+   empty — a quick default, not a lock: type over it for any other date. */
+function todayStr(){
+  const d=new Date(), pad=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+$("timeInput").addEventListener("focus",()=>{
+  if(!$("timeInput").value.trim()) $("timeInput").value=todayStr();
 });
 async function doUpload(){
   const f=$("fileInput").files[0];

@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+# runtime state — mounted as volumes, never baked into the image
+relay.db
+relay.env
+.env
+uploads/
+brain_target

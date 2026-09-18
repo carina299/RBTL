@@ -18,8 +18,8 @@ Three pieces, tied together by one shared key:
 
 | Component | Runs where | Does what | Need to modify it? |
 |---|---|---|---|
-| `backend/` relay | User's VPS (needs an HTTPS domain) | Persists messages + fans out via SSE + auth | Almost never — just fill in env vars |
-| `web/` PWA | Same VPS (static files) | The phone-side chat shell, added to the home screen | Edit 4 lines at the top of `CONFIG` |
+| `backend/` relay | **Pick one of 3 modes first — see §1①** (local Docker / VPS / Render) | Persists messages + fans out via SSE + auth; also long-term memory + album, both optional | Almost never — just fill in env vars |
+| `web/` PWA | Same place as the backend (static files), or Vercel in the split-origin mode | The phone-side chat shell, added to the home screen | Edit 4 lines at the top of `CONFIG` |
 | **AI side** | User's computer / server | The actual "AI brain" — receives messages → generates → replies | **Depends on which model the user uses, see §2** |
 
 **One shared key**: `RELAY_SECRET` guards the backend, the frontend login, and the AI
@@ -29,30 +29,104 @@ side all at once. All three **must match exactly**.
 know the relay's HTTP/SSE endpoints. So "switching to a different model" only means
 swapping out the AI-side layer; the frontend and backend stay untouched.
 
+**Optional subsystems, both off/local by default — don't set them up unless the
+user actually asks for them**: long-term memory (a Celery background job +
+pluggable LLM/embedding providers) and the album feature (photo storage,
+local disk or MinIO/S3). See §1④.
+
 ---
 
 ## 1. Deployment order (must be sequential — verify each step before moving to the next)
 
 ### ① Backend relay — get this running first; everything else is its client
-Follow [`backend/DEPLOY.md`](backend/DEPLOY.md). Key points:
-- Requires a **Linux VPS + a domain already configured for HTTPS** (the PWA/service
-  worker/push all require https — run `certbot` first if you don't have a cert).
-- `cp .env.example relay.env`, generate a `RELAY_SECRET`, fill in
-  `RELAY_ALLOW_ORIGINS` (the user's real https origin).
-- Start `companion-relay` under systemd; nginx needs two locations (`/relay/` reverse
-  proxy + `/chat/` static).
-- **Verify**: `curl https://<domain>/relay/healthz` must return `{"ok":true,...}`.
+
+**First, confirm which of the 3 deployment modes the user wants** — see the
+table at the top of [`DEPLOY.md`](DEPLOY.md) (the root one, not
+`backend/DEPLOY.md`). Picking the wrong one wastes the whole setup, same as
+§2's model decision:
+
+| Mode | When to pick it |
+|---|---|
+| **Local** (`docker compose`, no domain) | Trying it out, or the user and their phone are on the same LAN. |
+| **VPS** (`docker compose` + nginx/TLS, their own domain) | A real deployment they fully control — this is the classic "rent a VPS" path. |
+| **Website** (Render backend + Vercel frontend) | They don't want to manage a server at all; free tiers exist for both. |
+
+`docker compose up -d --build` (from the repo root, after `cp .env.example
+.env` and filling in `RELAY_SECRET`) is the fastest path for **Local** and
+**VPS** alike — it starts Postgres + Redis + MinIO + the backend + a Celery
+worker + the PWA together; see root `DEPLOY.md` for the VPS-specific nginx
+step and the Render/Vercel steps.
+
+Only fall back to the bare systemd + venv path in `backend/DEPLOY.md` if the
+user specifically doesn't want Docker (e.g. no Docker on their VPS, or a
+policy against it) — that doc's §2 covers it, and you'll need to run Redis
+yourself too if you also set up long-term memory (§1④).
+
+Either way:
+- **VPS/Docker mode needs a domain already configured for HTTPS** (the
+  PWA/service worker/push all require https — run `certbot` first if the
+  user doesn't have a cert yet). Local mode doesn't need this at all.
+- Generate a fresh `RELAY_SECRET`, fill in `RELAY_ALLOW_ORIGINS` (the real
+  https origin, or `http://localhost:8080` for Local mode).
+- **Verify**: `curl <backend-url>/healthz` must return `{"ok":true,...}`
+  (`<backend-url>` is `http://localhost:3011` for Local,
+  `https://<domain>/relay` for VPS, or the Render URL for Website).
 
 ### ② Frontend PWA
-Follow [`web/DEPLOY.md`](web/DEPLOY.md). `rsync web/` to nginx's static directory,
-edit the `CONFIG` block at the top of `index.html`
-(`APP_NAME`/`AI_NAME`/`HUMAN_NAME`/`SINCE`).
-- **Verify**: open `https://<domain>/chat/` on a phone, enter `RELAY_SECRET` in the
-  login box, and you should reach the chat page.
+Follow [`web/DEPLOY.md`](web/DEPLOY.md). Edit the `CONFIG` block at the top of
+`index.html` (`APP_NAME`/`AI_NAME`/`HUMAN_NAME`/`SINCE`) regardless of mode;
+the rest depends on which of §1①'s 3 modes you picked:
+- **Local**: nothing to deploy — docker-compose's `web` container already
+  serves `web/` at `:8080`.
+- **VPS**: `rsync web/` to nginx's static directory (see root `DEPLOY.md` §2).
+- **Website**: Vercel project with Root Directory = `web`, plus the one-line
+  `RELAY_URL` edit for split-origin (see root `DEPLOY.md` §3.2).
+- **Verify**: open the PWA URL on a phone (`http://<LAN-IP>:8080` for Local,
+  `https://<domain>/chat/` for VPS, the Vercel URL for Website), enter
+  `RELAY_SECRET` in the login box, and you should reach the chat page.
 - To preview the UI with zero backend: set `USE_MOCK=true` in `index.html` — it ships
   with a fake conversation (remember to set it back to `false` afterward).
 
 ### ③ AI side — see the decision tree below; this is where most people get stuck
+
+### ④ Optional: long-term memory + album
+
+**Skip this entirely unless the user specifically asks for it** — both are
+off/local by default and the core chat works fine without them.
+
+- **Long-term memory**: `MEMORY_EXTRACTION_ENABLED=false` by default. Turning
+  it on needs Redis (docker-compose already runs it) plus one working LLM
+  provider (`LLM_PROVIDER=anthropic|openai|gemini|openai_compatible`) and one
+  embedding provider (`EMBEDDING_PROVIDER=openai|gemini|local|local_hash`) —
+  each needs its own API key/base URL. Full table of env vars in
+  [`backend/DEPLOY.md`](backend/DEPLOY.md) §5. Two things that bite people:
+  - **`EMBEDDING_PROVIDER=local` needs `pip install sentence-transformers`**
+    (not installed by default — it pulls in torch) — if the user just wants
+    something that works with zero extra installs/keys, use `local_hash`
+    instead (deterministic, but not real semantic search).
+  - **Whatever embedding provider you pick must output `EMBEDDING_DIM`
+    (1536) vectors** — the Postgres column is a fixed size. `openai`'s
+    default model and `gemini`'s (requested at 1536) both already match; a
+    local model usually won't (e.g. `bge-small-en-v1.5` is 384-dim) and will
+    fail on insert, not at startup, so test it with a real message before
+    declaring victory.
+  - Agent-callable memory tools (`memory_search`/`memory_remember`) are a
+    **separate** MCP server (`backend/mcp_server.py`), not the same thing as
+    the background job — see §5.4 there, and copy
+    [`.mcp.json.example`](.mcp.json.example) to `.mcp.json` to register both
+    it and the `companion` channel plugin in one step.
+- **Album**: `STORAGE_BACKEND=local` by default (writes into the backend's
+  own upload dir — nothing else to configure). `STORAGE_BACKEND=minio` needs
+  a reachable MinIO/S3 bucket — docker-compose runs one itself, but on a VPS
+  or split-origin deploy double-check `MINIO_PUBLIC_ENDPOINT` (what the
+  **browser/phone** can reach, not just the backend container) or presigned
+  image URLs will 404 for the user even though everything looks fine
+  server-side. Details in `backend/DEPLOY.md` §6.
+- **Website mode caveat**: `render.yaml` only provisions the web service +
+  Postgres — no Redis, no Celery worker, no MinIO. If the user wants memory
+  extraction or MinIO albums on Render, they need to add those services
+  themselves; otherwise just leave `MEMORY_EXTRACTION_ENABLED=false` and
+  `STORAGE_BACKEND=local` and move on.
 
 ---
 
@@ -208,21 +282,33 @@ channel is connected.
 | 9 | The model "forgets everything" — every message feels like the first one | Context isn't being assembled. On every turn, `GET /app/history?limit=N` to pull history and build `messages` — see §3.1. |
 | 10 | The bridge stops receiving messages after a disconnect | SSE connections do drop — wrap it in an outer reconnect loop, and pass `?since={highest processed id}` so the relay resends messages missed during the disconnect (don't re-pull from 0 — that causes duplicate replies). |
 | 11 | The user receives duplicate replies | Violates the **single-body principle** (§3.4): both CC and the bridge are connected at once. Stop one of them. |
+| 12 | Memory extraction silently does nothing | `MEMORY_EXTRACTION_ENABLED` is still `false` (the default), or the Celery worker isn't running — check `docker compose logs celery_worker` / `celery -A celery_app worker -B` output for errors. |
+| 13 | `memory_search`/`memory_remember` errors with "not set" or "needs sentence-transformers" | The relevant `LLM_PROVIDER`/`EMBEDDING_PROVIDER` key/package isn't configured for whichever process is calling it — remember `.mcp.json`'s `memory` server has its **own** env block, separate from the backend's `.env`. |
+| 14 | Album photos upload fine but the timeline shows broken images | `MINIO_PUBLIC_ENDPOINT` doesn't match what the browser/phone can actually reach (presigned URLs use this, not `MINIO_ENDPOINT`) — see §1④. |
 
 ---
 
 ## 6. Self-check before handing off to the user
 
-- [ ] `curl https://<domain>/relay/healthz` → `{"ok":true}`
-- [ ] On a phone, `https://<domain>/chat/` logs in and shows the chat page
+- [ ] `curl <backend-url>/healthz` → `{"ok":true}` (`<backend-url>`: see §1①
+      for what this is per mode)
+- [ ] On a phone, the PWA URL (§1②) logs in and shows the chat page
 - [ ] Sending a message from the PWA → the AI-side process receives it (check bridge /
       CC logs)
 - [ ] The AI replies → a bubble appears on the phone within a few seconds
 - [ ] Sending an image → the AI side can retrieve it (multimodal models can see it)
 - [ ] Backgrounding the PWA on the phone → having the AI send another reply → a
       lock-screen push notification arrives (if VAPID is configured)
-- [ ] **Security**: `relay.env`/`*.pem`/`relay.db`/any API keys are not committed to
-      git; `RELAY_SECRET` is freshly generated and not reused from anywhere else
+- [ ] **Security**: `relay.env`/`.env`/`*.pem`/`relay.db`/`.mcp.json`/any API
+      keys are not committed to git; `RELAY_SECRET` is freshly generated and
+      not reused from anywhere else
+- [ ] **If long-term memory was enabled** (§1④): send a few messages, wait for
+      `MEMORY_EXTRACTION_EVERY_N` of them, and confirm `GET /memory/list`
+      shows something — or call `memory_remember` directly and check it shows
+      up there immediately
+- [ ] **If album was set up** (§1④): upload a photo through the PWA and
+      confirm it appears in the timeline with a working thumbnail (not a
+      broken image — that's pitfall #14)
 
 > Security baseline: if `RELAY_SECRET` leaks, anyone can read the entire
 > conversation and impersonate either party. This is a single-user model — one key

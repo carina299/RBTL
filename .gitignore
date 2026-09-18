@@ -13,8 +13,24 @@ relay.db-*
 uploads/
 inbox/
 last_in_id
-# Claude / MCP local config
+db_backups/
+*.dump
+# Claude / MCP local config — .mcp.json holds real DB credentials/absolute
+# paths once filled in; .mcp.json.example is the tracked template instead.
 .mcp.json
+# Claude Code's own per-machine state under .claude/ — none of this is
+# project config meant to be shared between contributors.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
+.claude/routines/.state/
+.claude/worktrees/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/agent-registry.json
+.claude/agent-memory-local
+.claude/first-run
+.claude/assistant-daemon-state.json
 
 # ── build / deps ────────────────────────────────────────────────────────
 node_modules/

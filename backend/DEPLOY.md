@@ -4,6 +4,10 @@ A server-side component for a **private 1:1 chat channel**: it connects the “P
 
 > This is a reusable version extracted from a private AI companion system and **thoroughly sanitized**. All names, keys, domains, and paths are parameterized through environment variables, and the code itself contains no private information. Treat it as your own foundation and feel free to modify it.
 
+> **This file documents the bare systemd + venv path.** For the shorter, Docker-based
+> route (recommended — also covers local dev and the Vercel/Render option), see
+> [`../DEPLOY.md`](../DEPLOY.md). Either way you'll need Postgres — see §1.5 below.
+
 ---
 
 ## 0. Architecture at a Glance
@@ -45,7 +49,29 @@ Data flow:
   → PWA installation, Service Worker, and **Web Push** all require HTTPS. A PWA cannot be installed over `http://`.
   → If you don't have a certificate yet, use certbot first: `apt install certbot python3-certbot-nginx && certbot --nginx -d your-domain.example`
 * Python 3.10+
-* This backend has very lightweight dependencies: FastAPI + uvicorn (+ optional pywebpush)
+* Core chat has very lightweight dependencies: FastAPI + uvicorn (+ optional pywebpush).
+  Long-term memory and the album feature (both optional, off/local by default —
+  see §5 and §6) add LangGraph, Celery/Redis, pgvector, and Pillow/minio on top.
+* **Postgres** (see §1.5) — messages are no longer stored in SQLite; only
+  `push_subscriptions` still is.
+
+### 1.5 Database (Postgres)
+
+Easiest: `docker compose up -d postgres` from the repo root (it's in
+`../docker-compose.yml`) — gives you Postgres + pgvector without installing
+anything system-wide. Then in `relay.env`:
+
+```
+RELAY_DATABASE_URL=postgresql+psycopg://rbtl:<password>@localhost:5432/rbtl
+```
+
+Apply the schema (from `backend/`, with the venv from §2.1 already set up):
+
+```bash
+./venv/bin/alembic upgrade head
+```
+
+Re-run this after every `git pull` that touches `backend/alembic/versions/`.
 
 ---
 
@@ -78,6 +104,7 @@ Put the generated secret into `RELAY_SECRET=` in `relay.env`, and fill in these 
 | Variable              | What to enter                                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------ |
 | `RELAY_SECRET`        | The random string generated above (**the same one must also be entered in the phone PWA**) |
+| `RELAY_DATABASE_URL`  | Postgres connection string — see §1.5                                                      |
 | `RELAY_AI_NAME`       | The name of your AI companion (used in push notification titles and voice narration)       |
 | `RELAY_HUMAN_NAME`    | Your name (the name used when the AI receives “×× started a voice call”)                   |
 | `RELAY_PUBLIC_PREFIX` | The API mount prefix on nginx, default `/relay`; **if changed, it must match nginx**       |
@@ -186,7 +213,140 @@ A test notification should appear on the phone's lock screen. `sent:0` usually m
 
 ---
 
-## 5. Connecting the Local AI Side (Brief Overview)
+## 5. Long-term memory
+
+Optional, off by default (`MEMORY_EXTRACTION_ENABLED=false`). When on, a
+Celery background job periodically distills recent dialogue into long-term
+memories (episodic: dated events; semantic: stable facts), deduplicated
+against what's already stored. The agent can also skip the wait and call
+`memory_search` / `memory_remember` directly — see §5.4.
+
+### 5.1 Background job (Celery + Redis)
+
+Needs Redis reachable at `REDIS_URL` (docker-compose provides one — see
+`../docker-compose.yml`'s `redis` service, which also wires `REDIS_URL` for
+you). Outside docker-compose, run:
+
+```bash
+./venv/bin/celery -A celery_app worker -B --loglevel=info
+```
+
+`-B` runs Celery's own beat scheduler in the same process for the daily
+maintenance reweight (`MemoryRepository.reweight` — a small importance boost
+for memories accessed a lot, a small decay for ones nobody's touched in a
+while) — fine for a single small deployment; split it into a separate
+`celery beat` process only if you outgrow that.
+
+| Variable | What it does |
+| --- | --- |
+| `MEMORY_EXTRACTION_ENABLED` | Master switch. Off by default so a fresh clone with no API keys still boots cleanly. |
+| `MEMORY_EXTRACTION_EVERY_N` | Every N inbound human messages, the backend enqueues one extraction run. |
+| `REDIS_URL` | Celery broker/result backend. |
+
+### 5.2 LLM provider (turns dialogue into candidate memories)
+
+`LLM_PROVIDER=anthropic|openai|gemini|openai_compatible` — defaults to
+whichever of `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY` is set
+first, else `openai_compatible` if `OPENAI_COMPATIBLE_API_BASE` is set.
+
+| Provider | Keys | Model var |
+| --- | --- | --- |
+| `anthropic` (default) | `ANTHROPIC_API_KEY` | `MEMORY_EXTRACTION_MODEL` (default `claude-haiku-4-5-20251001`) |
+| `openai` | `OPENAI_API_KEY` | `MEMORY_EXTRACTION_OPENAI_MODEL` (default `gpt-4o-mini`) |
+| `gemini` | `GEMINI_API_KEY` | `MEMORY_EXTRACTION_GEMINI_MODEL` (default `gemini-2.5-flash`) |
+| `openai_compatible` | `OPENAI_COMPATIBLE_API_KEY` (many self-hosted servers ignore this) + `OPENAI_COMPATIBLE_API_BASE` | `OPENAI_COMPATIBLE_MODEL` |
+
+`openai_compatible` is for anything speaking OpenAI's chat-completions wire
+format at a different base URL — Ollama, vLLM, OpenRouter, together.ai, etc.
+— with its own credentials so it never collides with a real `OPENAI_API_KEY`
+you might also have set for embeddings below.
+
+### 5.3 Embedding provider (dedup + similarity search)
+
+`EMBEDDING_PROVIDER=openai|gemini|local|local_hash` — defaults to whichever
+of `OPENAI_API_KEY`/`GEMINI_API_KEY` is set, else `local_hash`.
+
+| Provider | What it is | Keys / config |
+| --- | --- | --- |
+| `openai` (default if key set) | OpenAI's embeddings API | `OPENAI_API_KEY`, `OPENAI_EMBEDDING_MODEL` (default `text-embedding-3-small`) |
+| `gemini` | Google's Gemini embeddings API | `GEMINI_API_KEY`, `GEMINI_EMBEDDING_MODEL` (default `gemini-embedding-001`) |
+| `local` | A real local model (BGE/Qwen/MiniLM/...) via `sentence-transformers` — no network, no API key | `LOCAL_EMBEDDING_MODEL` (default `BAAI/bge-small-en-v1.5`); needs `pip install sentence-transformers` (not in `requirements.txt` — it pulls in torch) |
+| `local_hash` (default if no key set) | Deterministic, dependency-free dev/test stand-in — vectors carry **no semantic meaning** | nothing to configure |
+
+> **Dimension must match `EMBEDDING_DIM`** (`models.py`, default 1536 — the
+> pgvector column is a fixed size). `text-embedding-3-small` and
+> `gemini-embedding-001` (requested at 1536) both match the default out of
+> the box; a local model's native dimension usually won't (e.g. the default
+> `bge-small-en-v1.5` is 384-dim) — either pick a matching model/config or
+> change `EMBEDDING_DIM` and run a new migration before switching.
+
+### 5.4 Agent-callable memory tools (MCP server)
+
+Besides the background job, the agent can search or write memory directly
+via `mcp_server.py` — a separate stdio MCP server, independent of the
+`companion` channel plugin in `channel/`, exposing:
+
+- `memory_search(query, top_k=6)` — semantic search over the user's memories
+- `memory_remember(content, importance=0.5, memory_type="semantic")` — save
+  something right now instead of waiting for the next background pass
+
+Register it in `.mcp.json` alongside `companion` — the repo root's
+[`.mcp.json.example`](../.mcp.json.example) already has both entries, so
+`cp .mcp.json.example .mcp.json` and just fill in the real paths/password:
+
+```json
+{
+  "mcpServers": {
+    "companion": { "...": "..." },
+    "memory": {
+      "command": "/absolute/path/to/backend/venv/bin/python3",
+      "args": ["/absolute/path/to/backend/mcp_server.py"],
+      "env": {
+        "RELAY_DATABASE_URL": "postgresql+psycopg://rbtl:<password>@localhost:5432/rbtl",
+        "EMBEDDING_PROVIDER": "local_hash"
+      }
+    }
+  }
+}
+```
+
+It talks straight to Postgres (not through the relay's HTTP API), so it needs
+its own `RELAY_DATABASE_URL` and whichever LLM/embedding env vars from
+§5.2/§5.3 you want it to use — these can differ from the backend's own env
+since it's a separate process.
+
+### 5.5 Debug/admin endpoints
+
+`GET /memory/retrieve?query=&top_k=` and `GET /memory/list?memory_type=&limit=`
+exist for manual testing and housekeeping — the real conversation path goes
+through the MCP tools in §5.4, not these.
+
+---
+
+## 6. Album (object storage)
+
+Optional, defaults to `STORAGE_BACKEND=local` (writes into
+`RELAY_UPLOAD_DIR`, same as chat uploads). Set `STORAGE_BACKEND=minio` to use
+MinIO or a real S3/R2 bucket instead — docker-compose provides a MinIO
+container itself (see `../docker-compose.yml`'s `minio` service).
+
+| Variable | What it does |
+| --- | --- |
+| `STORAGE_BACKEND` | `local` or `minio` |
+| `MINIO_ENDPOINT` | Host:port MinIO/S3 is reachable at *from the backend* (docker-compose sets this to the internal `minio:9000`) |
+| `MINIO_PUBLIC_ENDPOINT` | Host:port a **browser/phone** can reach for presigned image URLs — only set if it differs from `MINIO_ENDPOINT` (e.g. compose's internal `minio:9000` vs. `localhost:9000` from outside the Docker network) |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Credentials |
+| `MINIO_BUCKET` | Default `rbtl-album` |
+| `MINIO_SECURE` | `true` for HTTPS to the MinIO endpoint |
+| `MINIO_REGION` | Default `us-east-1` |
+
+Uploaded photos get a JPEG thumbnail generated on upload (`storage.py`'s
+`make_thumbnail`) — the timeline view fetches thumbnails, not the original
+multi-MB file. See §10 for the album endpoints (`/app/album/*`).
+
+---
+
+## 7. Connecting the Local AI Side (Brief Overview)
 
 The default AI side is Claude Code running on your computer together with a **channel plugin**. It:
 
@@ -200,7 +360,7 @@ If you don't use Claude Code, skip `channel/` and directly run `examples/bridge_
 
 ---
 
-## 6. Things Intentionally Removed from This Version
+## 8. Things Intentionally Removed from This Version
 
 | Feature                                 | Why it was removed                                                | How to add it back                                     |
 | --------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------ |
@@ -210,11 +370,11 @@ If you don't use Claude Code, skip `channel/` and directly run `examples/bridge_
 | Sensor / `sense` reporting              | Feeds into a private scheduling heartbeat                         | Same as above                                          |
 | Memory editor cookie authentication     | Mounted on another independent backend                            | Usually unnecessary                                    |
 
-These are all **additive features**. Removing them does not affect core chat. When needed, add them back following the endpoint style described in §5.
+These are all **additive features**. Removing them does not affect core chat. When needed, add them back following the endpoint style described in §7.
 
 ---
 
-## 7. Security Notes (Must Read)
+## 9. Security Notes (Must Read)
 
 * **`RELAY_SECRET` is the only gate.** If it leaks, anyone can read your entire conversation history and impersonate either side. `chmod 600 relay.env`, don't commit it to git, and don't print it in externally visible logs.
 * **Each person must use their own fresh secret/VAPID/MiniMax key.** Never reuse them between friends—reusing keys means they can access each other's channels.
@@ -224,7 +384,7 @@ These are all **additive features**. Removing them does not affect core chat. Wh
 
 ---
 
-## 8. API Quick Reference
+## 10. API Quick Reference
 
 | Method | Path                                  | Used by   | Purpose                                                             |
 | ------ | ------------------------------------- | --------- | ------------------------------------------------------------------- |
@@ -244,5 +404,13 @@ These are all **additive features**. Removing them does not affect core chat. Wh
 | GET    | `/app/vapid_public`                   | PWA       | Retrieve the VAPID public key for subscription                      |
 | POST   | `/app/subscribe` · `/app/unsubscribe` | PWA       | Enable/disable lock-screen push subscription                        |
 | POST   | `/app/push_test`                      | PWA       | Send a test notification                                            |
+| GET    | `/memory/retrieve`                    | debug     | Manual memory search (§5.5) — the real path is the MCP tools, §5.4  |
+| GET    | `/memory/list`                        | debug     | List stored memories (`?memory_type=&limit=`)                       |
+| DELETE | `/memory/{memory_id}`                 | debug     | Soft-delete one memory                                              |
+| POST   | `/app/album/upload`                   | PWA       | Upload a photo + caption/time/group (`?name=&caption=&time=&group=`)|
+| GET    | `/app/album/list`                     | PWA       | Timeline page of photos (`?cursor=&limit=`)                         |
+| GET    | `/app/album/photo/{entry_id}`         | PWA       | One photo's detail (bumps its view count)                           |
+| GET    | `/app/album/random`                   | PWA       | One random photo                                                    |
+| GET    | `/app/album/file/{key}`                | PWA       | Fetch a stored photo/thumbnail by storage key                       |
 
 All endpoints (except `/healthz`) require `Authorization: Bearer <RELAY_SECRET>`; SSE endpoints can also use `?token=<RELAY_SECRET>`.
