@@ -1,0 +1,98 @@
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech&family=Patrick+Hand&family=Caveat:wght@600;700&display=swap');
+
+:root{
+  --ink:#4a3b3a;
+  --ink-soft:#6b5a58;
+  --paper:#fbf6ec;
+  --paper-dim:#f1e8d6;
+  --tape-pink:#f3c9c9;
+  --tape-yellow:#f6e6a8;
+  --tape-mint:#c7e3d4;
+  --rose:#e8899b;
+  --gold:#e8a94f;
+
+  --n-sky-1:#232041;
+  --n-sky-2:#3a3260;
+  --n-sky-3:#4c3f6e;
+  --n-text:#f3ead8;
+  --n-text-dim:#c9bcd6;
+
+  --d-sky-1:#bfe3f2;
+  --d-sky-2:#e7f5f4;
+  --d-hill-1:#8fc98a;
+  --d-hill-2:#6cae74;
+  --d-text:#4a3b3a;
+  --d-text-dim:#7a675f;
+
+  --font-hand:'Patrick Hand', cursive;
+  --font-script:'Caveat', cursive;
+  --font-tech:'Share Tech', monospace;
+  --ease: cubic-bezier(.42,0,.2,1);
+}
+
+*{
+  box-sizing:border-box;
+  -webkit-tap-highlight-color:transparent;
+}
+
+html,
+body{
+  margin:0;
+  padding:0;
+  height:100%;
+  width:100%;
+  overflow:hidden;
+}
+
+body{
+  font-family:var(--font-hand);
+  background:var(--n-sky-1);
+  color:var(--n-text);
+}
+
+button{
+  font-family:inherit;
+}
+
+.defs-holder{
+  position:absolute;
+  width:0;
+  height:0;
+  overflow:hidden;
+}
+
+@keyframes twinkle{
+  0%,100%{
+    opacity:.15;
+    transform:scale(1);
+  }
+  50%{
+    opacity:.9;
+    transform:scale(1.5);
+  }
+}
+
+@keyframes pulse{
+  0%,100%{
+    opacity:.3;
+  }
+  50%{
+    opacity:1;
+  }
+}
+
+@keyframes zap{
+  0%{
+    box-shadow:0 0 0 0 rgba(232,169,79,.7);
+  }
+  100%{
+    box-shadow:0 0 0 22px rgba(232,169,79,0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{
+    animation:none !important;
+    transition-duration:.15s !important;
+  }
+}

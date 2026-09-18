@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>RBTL · come home</title>
+  <link rel="stylesheet" href="css/intro.css">
+</head>
+<body>
+
+  <svg class="defs-holder" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="wobble" x="-30%" y="-30%" width="160%" height="160%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="6" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="2.4"/>
+      </filter>
+
+      <filter id="grainFilter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" result="n"/>
+        <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0"/>
+      </filter>
+    </defs>
+  </svg>
+
+  <section id="intro">
+    <div class="intro-texture"></div>
+    <div class="stars" id="stars"></div>
+
+    <button class="intro-lamp" id="introLamp" type="button" aria-label="turn the intro light on or off">
+      <span class="lamp-bulb">灯</span>
+      <span class="lamp-label">light</span>
+    </button>
+
+    <div class="brand">
+      <p class="mark">RBTL</p>
+      <p class="sub">a little house with the light left on for you</p>
+    </div>
+
+    <button class="house-btn" id="doorBtn" aria-label="Open the door and come home">
+      <div class="house-wrap">
+        <div class="house-glow"></div>
+
+        <svg viewBox="0 0 400 380" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <polyline class="roofline sketch" points="58,172 200,56 342,172" stroke-linejoin="round"></polyline>
+
+          <rect class="wallline sketch" x="80" y="170" width="240" height="180" rx="6"></rect>
+
+          <rect class="windowline sketch" x="108" y="204" width="52" height="52" rx="4"></rect>
+          <path class="windowcross" d="M108 230h52M134 204v52"></path>
+
+          <rect class="windowline sketch" x="240" y="204" width="52" height="52" rx="4"></rect>
+          <path class="windowcross" d="M240 230h52M266 204v52"></path>
+
+          <rect class="chimneyline sketch" x="266" y="84" width="26" height="60"></rect>
+          <path class="smokeline" d="M279 84 q -12 -18 0 -32 q12 -14 0 -30"></path>
+
+          <rect class="doorframeline sketch" x="172" y="238" width="76" height="112" rx="5"></rect>
+          <rect class="door-light" x="172" y="238" width="76" height="112" rx="5"></rect>
+
+          <g class="door-leaf">
+            <rect class="door-panel sketch" x="175" y="240" width="70" height="108" rx="4"></rect>
+            <circle class="door-knob" cx="234" cy="296" r="4.5"></circle>
+          </g>
+        </svg>
+
+        <div class="porch-glow"></div>
+      </div>
+    </button>
+
+    <p class="hint">
+      <span class="dot"></span>
+      tap the door to come home
+    </p>
+  </section>
+
+  <button class="skip-btn" id="skipBtn" type="button">skip intro</button>
+  <div id="flood"></div>
+
+  <script src="js/intro.js"></script>
+</body>
+</html>

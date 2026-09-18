@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>RBTL · desktop</title>
+  <link rel="stylesheet" href="css/desktop.css">
+</head>
+<body>
+
+  <svg class="defs-holder" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="wobble" x="-30%" y="-30%" width="160%" height="160%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="6" result="n"/>
+        <feDisplacementMap in="SourceGraphic" in2="n" scale="2.4"/>
+      </filter>
+
+      <filter id="grainFilter">
+        <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" result="n"/>
+        <feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0"/>
+      </filter>
+    </defs>
+  </svg>
+
+  <main id="desktop">
+    <div class="board">
+      <div class="sky-night"></div>
+      <div class="sky-day"></div>
+      <div class="grain" style="filter:url(#grainFilter)"></div>
+
+      <div class="daydeco cloud cloud-one"></div>
+      <div class="daydeco cloud cloud-two"></div>
+      <div class="daydeco cloud cloud-three"></div>
+      <div class="daydeco hill back"></div>
+      <div class="daydeco hill front"></div>
+
+      <button class="floating-heart heart-one" type="button" aria-label="tap heart">
+        <svg class="heart-art sketch" viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path class="heart-line" d="M32 50 C10 35 3 21 11 12 C18 3 30 5 32 16 C34 5 46 3 53 12 C61 21 54 35 32 50Z"></path>
+        </svg>
+      </button>
+      <button class="floating-heart heart-two" type="button" aria-label="tap heart">
+        <svg class="heart-art sketch" viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path class="heart-line" d="M32 50 C10 35 3 21 11 12 C18 3 30 5 32 16 C34 5 46 3 53 12 C61 21 54 35 32 50Z"></path>
+        </svg>
+      </button>
+      <button class="floating-heart heart-three" type="button" aria-label="tap heart">
+        <svg class="heart-art sketch" viewBox="0 0 64 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path class="heart-line" d="M32 50 C10 35 3 21 11 12 C18 3 30 5 32 16 C34 5 46 3 53 12 C61 21 54 35 32 50Z"></path>
+        </svg>
+      </button>
+
+
+      <button class="lamp-toggle" id="lampToggle" type="button" aria-label="Turn day or night mode on or off">
+        <span>灯</span>
+      </button>
+      <div class="lamp-cord"></div>
+
+      <button class="edit-toggle" id="editToggle" type="button" aria-label="edit desktop icons">
+        edit desktop
+      </button>
+
+      <div class="clock-note">
+        <div class="time" id="clockTime">14:32</div>
+        <div class="date" id="clockDate">Tue, Sep 15</div>
+      </div>
+
+      <div class="partner-card" id="partnerCard">
+        <div class="row">
+          <div class="face" id="partnerFace">♡</div>
+          <div>
+            <p class="name" id="partnerName">FROM TA</p>
+            <p class="msg" id="partnerMsg">welcome back — i've been waiting</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="icon-layer" id="iconLayer"></div>
+
+      <div class="dock" id="dock"></div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/desktop.js"></script>
+</body>
+</html>
