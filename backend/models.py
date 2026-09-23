@@ -275,7 +275,7 @@ class AlbumEntry(Base):
     it was uploaded (`created_at`).
 
     `group_name`, `time_label`, `views`, `notes` aren't in the original schema —
-    they exist because `web/album.html` (the actual frontend shell already
+    they exist because `frontend/memories.html` (the actual frontend shell already
     built, not just a wireframe) has its own self-documented API contract
     that's flatter than the doc's and includes features the doc never
     mentioned: a free-text "group" tag for loose albums, a `views` counter,

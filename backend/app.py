@@ -939,7 +939,7 @@ def memory_delete(request: Request, memory_id: int, db: Session = Depends(get_db
 
 def _album_photo_url(entry, att_repo: AttachmentRepository) -> str | None:
     """Proxied through this backend's own /app/album/file/{key} — deliberately
-    NOT `storage.url_for()`'s direct presigned MinIO URL. `web/album.html`'s
+    NOT `storage.url_for()`'s direct presigned MinIO URL. `frontend/memories.html`'s
     own `imgUrl()` unconditionally appends `&token=<secret>` to every image
     URL it renders (that's how it authenticates the local-storage backend's
     `/uploads/{name}`) — but AWS SigV4 signs the entire query string, so an

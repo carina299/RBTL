@@ -19,7 +19,7 @@ Three pieces, tied together by one shared key:
 | Component | Runs where | Does what | Need to modify it? |
 |---|---|---|---|
 | `backend/` relay | **Pick one of 3 modes first — see §1①** (local Docker / VPS / Render) | Persists messages + fans out via SSE + auth; also long-term memory + album, both optional | Almost never — just fill in env vars |
-| `web/` PWA | Same place as the backend (static files), or Vercel in the split-origin mode | The phone-side chat shell, added to the home screen | Edit 4 lines at the top of `CONFIG` |
+| `frontend/` static pages | Same place as the backend (static files), or Vercel in the split-origin mode | The phone-side chat shell + photo album | Nothing — relay URL and key are entered in the app's settings |
 | **AI side** | User's computer / server | The actual "AI brain" — receives messages → generates → replies | **Depends on which model the user uses, see §2** |
 
 **One shared key**: `RELAY_SECRET` guards the backend, the frontend login, and the AI
@@ -72,20 +72,27 @@ Either way:
   (`<backend-url>` is `http://localhost:3011` for Local,
   `https://<domain>/relay` for VPS, or the Render URL for Website).
 
-### ② Frontend PWA
-Follow [`web/DEPLOY.md`](web/DEPLOY.md). Edit the `CONFIG` block at the top of
-`index.html` (`APP_NAME`/`AI_NAME`/`HUMAN_NAME`/`SINCE`) regardless of mode;
-the rest depends on which of §1①'s 3 modes you picked:
+### ② Frontend
+Follow [`frontend/DEPLOY.md`](frontend/DEPLOY.md). Nothing in the source needs
+editing — the relay URL and key are entered in the app's own chat settings. How
+you deploy depends on which of §1①'s 3 modes you picked:
 - **Local**: nothing to deploy — docker-compose's `web` container already
-  serves `web/` at `:8080`.
-- **VPS**: `rsync web/` to nginx's static directory (see root `DEPLOY.md` §2).
-- **Website**: Vercel project with Root Directory = `web`, plus the one-line
-  `RELAY_URL` edit for split-origin (see root `DEPLOY.md` §3.2).
-- **Verify**: open the PWA URL on a phone (`http://<LAN-IP>:8080` for Local,
-  `https://<domain>/chat/` for VPS, the Vercel URL for Website), enter
-  `RELAY_SECRET` in the login box, and you should reach the chat page.
-- To preview the UI with zero backend: set `USE_MOCK=true` in `index.html` — it ships
-  with a fake conversation (remember to set it back to `false` afterward).
+  serves `frontend/` at `:8080`.
+- **VPS**: `rsync frontend/` to nginx's static directory (see root `DEPLOY.md` §2).
+- **Website**: Vercel project with Root Directory = `frontend` (see root
+  `DEPLOY.md` §3.2). Split-origin is the one mode where **Relay URL must be set
+  explicitly** in chat settings — auto-detection only covers same-origin and
+  localhost.
+- **Verify**: open the URL (`http://<LAN-IP>:8080` for Local,
+  `https://<domain>/chat/` for VPS, the Vercel URL for Website) → walk through
+  the intro to the chat → chat settings → paste `RELAY_SECRET` into
+  **Connection key**. The status line should read `live` and history should load.
+
+> ⚠️ **This frontend is not currently a PWA** — it has no `manifest.webmanifest`
+> and nothing registers `sw.js`, so Add to Home Screen, offline, and lock-screen
+> push do not work. Image/file sending, voice messages, and calls are placeholder
+> buttons too. See `frontend/DEPLOY.md` §5–6 for the full gap list before
+> promising a user any of it.
 
 ### ③ AI side — see the decision tree below; this is where most people get stuck
 
@@ -271,13 +278,13 @@ channel is connected.
 
 | # | Symptom | Real cause / fix |
 |---|---|---|
-| 1 | PWA won't install / service worker won't register / no push notifications | **Not using HTTPS.** PWA install, the service worker, and Web Push all require https — neither `http://` nor `file://` will work. |
+| 1 | PWA won't install / service worker won't register / no push notifications | **First check: `frontend/` has no `manifest.webmanifest` and no `serviceWorker.register()` call at all**, so none of this can work regardless of hosting — see `frontend/DEPLOY.md` §6 for what restoring it involves. Once it *is* restored, the next cause is **not using HTTPS**: PWA install, the service worker, and Web Push all require https — neither `http://` nor `file://` will work. |
 | 2 | Every request returns 401 | `RELAY_SECRET` **doesn't match across all three places** (backend `relay.env` / frontend login box / AI side). It must be the exact same key everywhere. |
 | 3 | Frontend "connects but never receives real-time messages" | nginx is buffering the SSE stream. The `/relay/` block must have `proxy_buffering off; proxy_read_timeout 3600s;` (already in the template — don't remove it). **The #1 hidden pitfall.** |
 | 4 | Browser console shows CORS errors | `RELAY_ALLOW_ORIGINS` doesn't contain the user's real https origin. |
 | 5 | Images send but fail to load (404) | `RELAY_PUBLIC_PREFIX` doesn't match nginx's location prefix (attachment URLs are built using this prefix). The two must be identical (both default to `/relay`). |
 | 6 | Image upload returns 413 | nginx's `client_max_body_size` is smaller than `RELAY_MAX_UPLOAD_BYTES`. Increase the nginx setting. |
-| 7 | Frontend changes "don't take effect" — existing users stuck on the old UI | After editing `web/`, the `CACHE` version at the top of `sw.js` wasn't bumped (`companion-v1` → `v2`). The PWA precached the old shell. |
+| 7 | Frontend changes "don't take effect" — you edit `frontend/` and the browser keeps showing the old page | **A service worker registered by the old PWA is still intercepting requests.** A registered SW survives the code that registered it being deleted, and this one is cache-first for same-origin GETs — so it keeps serving stale files even though nothing in `frontend/` registers it any more. Unregister it (DevTools → Application → Service Workers, or `navigator.serviceWorker.getRegistrations()` → `unregister()` + `caches.delete()`), then hard-reload. No nginx config here sets `Cache-Control`, so ordinary browser caching can do the same thing on a soft reload. Phones are worst — unregister from the mobile browser first. See `frontend/DEPLOY.md` §7. |
 | 8 | Writing your own AI side and SSE won't connect | Browsers' `EventSource` can't set custom headers, so the relay's SSE endpoints **also accept `?token=<SECRET>`** — but when writing an SSE client server-side (a bridge), you **should use the `Authorization: Bearer` header** instead. |
 | 9 | The model "forgets everything" — every message feels like the first one | Context isn't being assembled. On every turn, `GET /app/history?limit=N` to pull history and build `messages` — see §3.1. |
 | 10 | The bridge stops receiving messages after a disconnect | SSE connections do drop — wrap it in an outer reconnect loop, and pass `?since={highest processed id}` so the relay resends messages missed during the disconnect (don't re-pull from 0 — that causes duplicate replies). |

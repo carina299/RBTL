@@ -1,6 +1,6 @@
 # Deployment — 3 modes
 
-Same backend (`backend/`), same frontend (`web/`), same AI side (`channel/` or
+Same backend (`backend/`), same frontend (`frontend/`), same AI side (`channel/` or
 `examples/`) in all three. What differs is only **where the backend + Postgres +
 static frontend run**, and — for split-origin cloud — one line in the frontend
 config so it knows where to find the backend.
@@ -38,9 +38,11 @@ This starts six containers:
 - `backend` — the relay, `http://localhost:3011`
 - `celery_worker` — runs the memory-extraction job and its daily maintenance
   reweight; same image as `backend`, no uvicorn
-- `web` — the PWA, `http://localhost:8080`
+- `web` — nginx serving `frontend/`, `http://localhost:8080`
 
-Open `http://localhost:8080`, paste `RELAY_SECRET` into the login box. `docker
+Open `http://localhost:8080`, walk through to the chat, and paste `RELAY_SECRET`
+into *chat settings → Connection key* (see
+[`frontend/DEPLOY.md`](frontend/DEPLOY.md) §3). `docker
 compose logs -f backend` to watch it; `docker compose down` to stop (add `-v` to
 also wipe the Postgres/Redis/MinIO volumes and uploaded files — normally you
 don't want that).
@@ -128,15 +130,17 @@ frontend goes on **Vercel**.
 ### 3.2 Frontend → Vercel
 
 1. Vercel dashboard → **New Project** → import the repo → set **Root Directory**
-   to `web`. No build command, no output directory — it's static.
-2. Before deploying, edit [`web/index.html`](web/index.html) (and
-   [`web/album.html`](web/album.html)) — set:
-   ```js
-   const RELAY_URL = "https://rbtl-backend-xxxx.onrender.com";  // your Render URL from 3.1
-   ```
-   (This is the one line that makes a split-origin deploy work with zero build
-   step — see the comment above it in `index.html`.)
-3. Deploy. Vercel gives you `https://your-project.vercel.app`.
+   to `frontend`. No build command, no output directory — it's static.
+2. Deploy. Vercel gives you `https://your-project.vercel.app`.
+3. Open it, go to *chat settings → Backend connection*, and set **Relay URL** to
+   your Render URL from 3.1 (`https://rbtl-backend-xxxx.onrender.com`) plus the
+   **Connection key**. Split-origin is the one case where Relay URL can't be
+   left blank — auto-detection only covers same-origin and localhost.
+
+   To bake the URL in instead of typing it per device, set
+   `BACKEND_URL_DEFAULT` near the top of
+   [`frontend/chat.html`](frontend/chat.html)'s script block. The key is never
+   hardcoded.
 
 ### 3.3 Close the loop
 
@@ -154,12 +158,14 @@ other mode.
 
 ## Frontend config reference
 
-`web/index.html` / `web/album.html` resolve the backend address in this order:
+`frontend/chat.html` / `frontend/memories.html` resolve the backend address in
+this order (both share the same stored settings):
 
-1. `RELAY_URL` set → use it verbatim (**website mode**, split origins)
-2. `RELAY_URL` empty + running on `localhost`/`127.0.0.1` → talk to `:3011`
+1. **Relay URL** set (chat settings, or `BACKEND_URL_DEFAULT` in the source) →
+   use it verbatim (**website mode**, split origins)
+2. Relay URL empty + running on `localhost`/`127.0.0.1` → talk to `:3011`
    directly (**local mode**, no nginx in front)
-3. `RELAY_URL` empty + anywhere else → same-origin relative `/relay`
+3. Relay URL empty + anywhere else → same-origin relative `/relay`
    (**VPS mode**, nginx reverse-proxies it)
 
 `RELAY_PUBLIC_PREFIX` on the backend mirrors this: `/relay` when nginx strips a

@@ -404,7 +404,7 @@ class AttachmentRepository:
 
 
 def album_photo_dict(e: AlbumEntry, img_url: str | None) -> dict:
-    """The shape `web/album.html`'s JS actually expects (its own
+    """The shape `frontend/memories.html`'s JS actually expects (its own
     self-documented contract, see the comment at the top of that file's
     <script> block) — flatter than the doc's schema: one photo per dict
     (`img`, the first attachment's resolved URL — this app only ever

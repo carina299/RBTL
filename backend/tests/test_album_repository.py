@@ -1,5 +1,5 @@
 """Tests for `AlbumRepository`/`AttachmentRepository` (extended with
-the columns `web/album.html`'s actual API contract needs — see repositories.py's
+the columns `frontend/memories.html`'s actual API contract needs — see repositories.py's
 `album_photo_dict` docstring) — against a real Postgres transaction.
 """
 
@@ -111,7 +111,7 @@ def test_list_timeline_only_returns_the_given_user(db_session, test_user_id):
     assert [e.caption for e in page] == ["mine"]
 
 
-# --- group_name / time_label / views / notes (web/album.html's contract) ---
+# --- group_name / time_label / views / notes (frontend/memories.html's contract) ---
 
 def test_create_stores_group_and_time_label(db_session, test_user_id):
     att = _make_attachment(db_session, test_user_id)
