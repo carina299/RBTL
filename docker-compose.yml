@@ -126,7 +126,7 @@ services:
     image: nginx:alpine
     container_name: rbtl_web
     volumes:
-      - ./web:/usr/share/nginx/html:ro
+      - ./frontend:/usr/share/nginx/html:ro
     ports:
       - "8080:80"
     depends_on:

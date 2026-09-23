@@ -1327,14 +1327,20 @@
       <h4>Backend connection</h4>
       <div class="backend-status" id="backendStatus">
         <span class="dot"></span>
-        <span id="backendStatusText">demo mode — replies are made up locally</span>
+        <span id="backendStatusText">checking the relay…</span>
       </div>
 
-      <label for="backendUrlInput">API URL from your friend</label>
-      <input type="text" id="backendUrlInput" placeholder="https://their-api.example.com/chat" />
+      <label for="backendUrlInput">Relay URL</label>
+      <input type="text" id="backendUrlInput" placeholder="leave blank to auto-detect" />
       <p class="backend-hint">
-        Sends a POST with <code>{ message, history, contact }</code> as JSON and expects
-        <code>{ reply: "..." }</code> back. Leave blank to keep using made-up replies.
+        Blank auto-detects: <code>localhost:3011</code> when running locally, same-origin
+        <code>/relay</code> behind nginx. Set it only when the relay is on another origin.
+      </p>
+
+      <label for="secretInput">Connection key</label>
+      <input type="password" id="secretInput" placeholder="RELAY_SECRET" autocomplete="off" />
+      <p class="backend-hint">
+        The relay's <code>RELAY_SECRET</code>. Stored on this device only.
       </p>
 
       <div class="row">
@@ -1418,43 +1424,34 @@
       const HISTORY_KEY = "rbtl-chat-history-v1";
       const NOTIFY_KEY = "rbtl-chat-notify-v1";
       const THEME_KEY = "rbtl-chat-theme-v1";
-      const BACKEND_URL_KEY = "rbtl-chat-backend-url-v1";
+      // Shared with memories.html — one relay, one key, set it in either page.
+      const BACKEND_URL_KEY = "rbtl-relay-url-v1";
+      const SECRET_KEY = "rbtl-relay-secret-v1";
 
       const AVATARS = ["♡", "✿", "☕", "🌙", "🐻", "⭐"];
 
       // ---------------------------------------------------------------
-      // BACKEND INTEGRATION
-      // Set a default endpoint here if you'd rather hardcode it, e.g.
-      //   const BACKEND_URL_DEFAULT = "https://your-friend-api.example.com/chat";
-      // Otherwise leave it blank and paste the URL into Chat settings ->
-      // "API URL from your friend" instead (no code edits needed).
+      // BACKEND INTEGRATION — RBTL relay
       //
-      // Request sent (POST, JSON):
-      //   { message: "<latest text from the user>",
-      //     history: [ { from: "me"|"them", text, time }, ... up to 20 ],
-      //     contact: { name, mood, avatar, ...profile fields } }
+      // The relay is asynchronous: POST /app/send only returns {id}
+      // ("stored"). The AI's reply arrives later over the SSE stream, so
+      // every message — including the echo of your own — is rendered from
+      // the stream, never from a request's return value.
       //
-      // Expected response (JSON), any one of these keys works:
-      //   { reply: "..." } or { text: "..." } or { message: "..." }
+      //   GET  /app/history?since=&limit=  -> { messages: [...] }
+      //   POST /app/send  { text }         -> { id }
+      //   GET  /app/stream?token=          -> SSE
+      //   POST /app/ping                   -> foreground heartbeat
       //
-      // If the request fails, is unreachable, or no URL is configured,
-      // the chat quietly falls back to a made-up local reply so the UI
-      // never breaks.
+      // Message shape: { id, ts, from:"human"|"ai", kind, text, meta }
+      // Stream also carries { type:"typing", active } and { type:"ping" }.
+      // Auth: `Authorization: Bearer <RELAY_SECRET>` on every request;
+      // SSE uses ?token= because EventSource cannot set headers.
+      //
+      // Leave BACKEND_URL_DEFAULT blank to auto-detect (localhost -> the
+      // relay on :3011, anywhere else -> same-origin /relay behind nginx).
       // ---------------------------------------------------------------
       const BACKEND_URL_DEFAULT = "";
-
-      const AUTO_REPLIES = [
-        "hehe, I was just thinking about you.",
-        "tell me about your day? I want all the little details.",
-        "come find me on the desktop later~",
-        "sending you a little hug from over here.",
-        "I saved you a seat by the window.",
-        "don't forget to drink some water today, okay?",
-        "you always know how to make me smile.",
-        "it's cozier here now that you're talking to me.",
-        "what are you up to right now?",
-        "I left the light on, just so you know."
-      ];
 
       const DEFAULT_PROFILE = {
         avatar:"♡", name:"TA", mood:"always here for you", photo:"",
@@ -1526,23 +1523,29 @@
         }catch(error){ /* skip */ }
       }
 
-      function seedHistory(){
-        const now = Date.now();
-        return [
-          { from:"them", text:"welcome home. I kept the light on for you.", time: now - 1000 * 60 * 6 },
-          { from:"them", text:"tap the little heart if you're smiling right now ♡", time: now - 1000 * 60 * 5 }
-        ];
+      function loadSecret(){
+        try{
+          return localStorage.getItem(SECRET_KEY) || "";
+        }catch(error){
+          return "";
+        }
       }
 
+      function saveSecret(value){
+        try{
+          localStorage.setItem(SECRET_KEY, value);
+        }catch(error){ /* skip */ }
+      }
+
+      // Cache only — the relay is the source of truth. This exists so a
+      // reload paints instantly (and still shows something when the relay
+      // is unreachable) before the server history replaces it.
       function loadHistory(){
         try{
           const raw = JSON.parse(localStorage.getItem(HISTORY_KEY));
-          if (Array.isArray(raw) && raw.length) return raw;
-        }catch(error){ /* fall through to seed */ }
-
-        const seeded = seedHistory();
-        saveHistory(seeded);
-        return seeded;
+          if (Array.isArray(raw)) return raw;
+        }catch(error){ /* skip */ }
+        return [];
       }
 
       function saveHistory(list){
@@ -1556,6 +1559,7 @@
       let notifyOn = loadNotify();
       let theme = loadTheme();
       let backendUrl = loadBackendUrl();
+      let secret = loadSecret();
 
       let pendingAvatar = profile.avatar;
       let pendingPhoto = profile.photo;
@@ -1563,6 +1567,22 @@
       let clearArmed = false;
       let clearArmTimer = null;
       let toastTimer = null;
+
+      let stream = null;
+      let streamState = "offline";        // offline | connecting | live | unauthorized
+      let authProbeInFlight = false;
+      const seenIds = new Set();          // relay message ids already rendered
+
+      function apiBase(){
+        if (backendUrl) return backendUrl.replace(/\/+$/, "");
+        const host = location.hostname;
+        if (host === "localhost" || host === "127.0.0.1") return location.protocol + "//" + host + ":3011";
+        return "/relay";
+      }
+
+      function authHeaders(){
+        return { "Authorization": "Bearer " + secret };
+      }
 
       function pad(n){
         return n < 10 ? "0" + n : "" + n;
@@ -1615,14 +1635,22 @@
       function refreshBackendStatus(){
         const box = $("backendStatus");
         const text = $("backendStatusText");
-        const live = !!backendUrl;
 
-        box.classList.toggle("live", live);
-        text.textContent = live
-          ? "connected — replies come from your friend's backend"
-          : "demo mode — replies are made up locally";
+        box.classList.toggle("live", streamState === "live");
+        text.textContent =
+          !secret ? "no connection key — paste it below to come online"
+          : streamState === "live" ? "live — listening on " + apiBase()
+          : streamState === "unauthorized" ? "connection key rejected by " + apiBase()
+          : streamState === "connecting" ? "connecting to " + apiBase() + "…"
+          : "offline — can't reach " + apiBase();
 
         $("backendUrlInput").value = backendUrl;
+        $("secretInput").value = secret;
+      }
+
+      function setStreamState(state){
+        streamState = state;
+        if (!$("chatSettingsModal").classList.contains("hidden")) refreshBackendStatus();
       }
 
       /* ---------- messages ---------- */
@@ -1727,41 +1755,137 @@
         if (row) row.remove();
       }
 
-      function pickCannedReply(){
-        return AUTO_REPLIES[Math.floor(Math.random() * AUTO_REPLIES.length)];
+      /* ---------- relay ---------- */
+
+      function fromRelay(m){
+        return {
+          id: m.id,
+          from: m.from === "human" ? "me" : "them",
+          text: m.text || "",
+          time: new Date(m.ts).getTime()
+        };
       }
 
-      function wait(ms){
-        return new Promise(function(resolve){ setTimeout(resolve, ms); });
+      // The relay echoes a sent message over the stream *before* /app/send
+      // returns its id, so either path can be the first to see it. Whoever
+      // claims the id renders it; the other one drops it.
+      function claimId(id){
+        if (id == null) return true;
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
       }
 
-      async function getReply(userText){
-        if (backendUrl){
-          try{
-            const res = await fetch(backendUrl, {
-              method:"POST",
-              headers:{ "Content-Type":"application/json" },
-              body:JSON.stringify({
-                message:userText,
-                history:history.slice(-20),
-                contact:profile
-              })
-            });
+      // `thinking` / `act` are the AI's internal chatter and ambient notes:
+      // the relay streams them for the desktop client, but they would flood
+      // this window.
+      function isChatMessage(m){
+        if (m.type) return false;
+        return m.kind !== "thinking" && m.kind !== "act";
+      }
 
-            if (!res.ok) throw new Error("bad status " + res.status);
+      // /app/history is a forward cursor (`id > since`, oldest first, capped
+      // at 500), so "the most recent N" means paging to the end and keeping
+      // the tail — there is no "latest" parameter to ask for.
+      const HISTORY_PAGE = 200;
+      const HISTORY_KEEP = 200;
 
-            const data = await res.json();
-            const reply = data.reply ?? data.text ?? data.message;
+      async function pullHistory(){
+        const rows = [];
+        let since = 0;
 
-            if (typeof reply === "string" && reply.trim()) return reply;
-            throw new Error("empty reply from backend");
-          }catch(error){
-            console.warn("[RBTL chat] backend call failed, using a local reply instead:", error);
-            return pickCannedReply();
-          }
+        for (let guard = 0; guard < 50; guard++){
+          const r = await fetch(apiBase() + "/app/history?since=" + since + "&limit=" + HISTORY_PAGE, { headers: authHeaders() });
+          if (!r.ok) throw new Error("history " + r.status);
+
+          const batch = (await r.json()).messages || [];
+          if (!batch.length) break;
+
+          rows.push.apply(rows, batch);
+          since = batch.reduce(function(max, m){ return Math.max(max, m.id); }, since);
+          if (batch.length < HISTORY_PAGE) break;
         }
 
-        return pickCannedReply();
+        // Add, never clear: a reconnect can land between a send's echo and its
+        // POST response, and wiping the registry mid-flight re-renders that
+        // message. Ids only ever accumulate, which is what "already drawn" means.
+        rows.forEach(function(m){ seenIds.add(m.id); });
+
+        history = rows.filter(isChatMessage).map(fromRelay).slice(-HISTORY_KEEP);
+        saveHistory(history);
+        renderMessages();
+      }
+
+      function openStream(){
+        if (stream){
+          try{ stream.close(); }catch(error){ /* skip */ }
+          stream = null;
+        }
+        if (!secret){
+          setStreamState("offline");
+          return;
+        }
+
+        setStreamState("connecting");
+        stream = new EventSource(apiBase() + "/app/stream?token=" + encodeURIComponent(secret));
+
+        stream.onopen = function(){
+          setStreamState("live");
+          pullHistory().catch(function(){ /* the stream still works without a backfill */ });
+        };
+
+        stream.onmessage = function(event){
+          let m;
+          try{ m = JSON.parse(event.data); }catch(error){ return; }
+
+          setStreamState("live");
+
+          if (m.type === "typing"){
+            if (m.active) showTyping(); else removeTyping();
+            return;
+          }
+          if (!isChatMessage(m)) return;
+          if (!claimId(m.id)) return;         // already rendered: our own echo, or a reconnect repeat
+
+          if (m.from === "ai") removeTyping();
+          appendMessage(fromRelay(m));
+          if (notifyOn && m.from === "ai") flashStripPing();
+        };
+
+        // EventSource retries by itself and never reports a status code, so a
+        // rejected key looks exactly like a flaky network — probe once to tell
+        // them apart, and stop retrying when the key is the problem.
+        stream.onerror = function(){
+          setStreamState("connecting");
+          if (authProbeInFlight) return;
+
+          // A 401 only condemns the key it was sent with: if the user saves a
+          // new one while this is in flight, the answer is about the old key.
+          const probeStream = stream;
+          const probeSecret = secret;
+
+          authProbeInFlight = true;
+          fetch(apiBase() + "/app/history?since=0&limit=1", { headers: authHeaders() })
+            .then(function(r){
+              if (r.status !== 401) return;
+              if (stream !== probeStream || secret !== probeSecret) return;
+              if (stream){
+                try{ stream.close(); }catch(error){ /* skip */ }
+                stream = null;
+              }
+              setStreamState("unauthorized");
+            })
+            .catch(function(){ /* relay unreachable — let EventSource keep retrying */ })
+            .finally(function(){ authProbeInFlight = false; });
+        };
+      }
+
+      function startHeartbeat(){
+        setInterval(function(){
+          if (document.hidden || !secret) return;
+          fetch(apiBase() + "/app/ping", { method:"POST", headers: authHeaders(), keepalive:true })
+            .catch(function(){ /* presence is best-effort */ });
+        }, 60000);
       }
 
       async function sendMessage(){
@@ -1769,19 +1893,34 @@
         const text = input.value.trim();
         if (!text) return;
 
-        appendMessage({ from:"me", text:text, time:Date.now() });
+        if (!secret){
+          showToast("add your connection key in chat settings first");
+          return;
+        }
+
         input.value = "";
         autoSize(input);
 
-        showTyping();
+        try{
+          const r = await fetch(apiBase() + "/app/send", {
+            method:"POST",
+            headers: Object.assign({ "Content-Type":"application/json" }, authHeaders()),
+            body: JSON.stringify({ text: text })
+          });
+          if (r.status === 401){
+            setStreamState("unauthorized");
+            throw new Error("connection key rejected");
+          }
+          if (!r.ok) throw new Error("send " + r.status);
 
-        const [reply] = await Promise.all([ getReply(text), wait(650) ]);
-
-        removeTyping();
-        appendMessage({ from:"them", text:reply, time:Date.now() });
-
-        if (notifyOn){
-          flashStripPing();
+          const data = await r.json();
+          if (claimId(data.id)){   // false = the stream's echo already drew it
+            appendMessage({ id: data.id, from:"me", text: text, time: Date.now() });
+          }
+        }catch(error){
+          input.value = text;     // hand the text back instead of losing it
+          autoSize(input);
+          showToast("couldn't send — " + error.message);
         }
       }
 
@@ -1820,8 +1959,15 @@
         saveNotify(notifyOn);
 
         const url = $("backendUrlInput").value.trim();
+        const key = $("secretInput").value.trim();
+        const reconnect = url !== backendUrl || key !== secret;
+
         backendUrl = url;
         saveBackendUrl(url);
+        secret = key;
+        saveSecret(key);
+
+        if (reconnect) openStream();
 
         refreshBackendStatus();
         closeChatSettings();
@@ -1959,19 +2105,24 @@
           return;
         }
 
-        history = seedHistory();
+        // Local copy only — the relay has no message-delete endpoint, so a
+        // reload or reconnect pulls the conversation back from the server.
+        history = [];
         saveHistory(history);
+        seenIds.clear();
         renderMessages();
         resetClearArm();
         closeProfile();
-        showToast("history cleared");
+        showToast("local copy cleared — the relay still has it");
       }
 
       /* ---------- wire up ---------- */
 
       applyTheme();
       refreshContactUI();
-      renderMessages();
+      renderMessages();   // paints the cached copy; openStream() reconciles with the relay
+      openStream();
+      startHeartbeat();
 
       $("backBtn").addEventListener("click", function(){
         window.location.href = "desktop.html";

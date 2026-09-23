@@ -1350,8 +1350,8 @@
       <label for="captionInput">Caption</label>
       <input type="text" id="captionInput" placeholder="write a tiny note..." />
 
-      <label for="tagInput">Tags</label>
-      <input type="text" id="tagInput" placeholder="home, date, cloud..." />
+      <label for="albumInput">Album</label>
+      <input type="text" id="albumInput" placeholder="Home, Travel, Night..." />
 
       <div class="row">
         <button class="ghost" id="clearUpload">Clear</button>
@@ -1369,82 +1369,91 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
-    const STORAGE_KEY = "rbtl-memories-local-v1";
+    // ---------------------------------------------------------------
+    // BACKEND INTEGRATION — RBTL relay album
+    //   GET  /app/album/list            -> { photos: [{id, img, caption, time, group, views}] }
+    //   GET  /app/album/photo/{id}      -> the same + notes_list, bumps views
+    //   POST /app/album/upload?name=&caption=&group=  (raw bytes body)
+    //
+    // `img` comes back as a relay-relative path the backend proxies; an
+    // <img> tag can't send an Authorization header, so it authenticates
+    // with ?token= instead (the relay's check_auth accepts either).
+    //
+    // URL + key are shared with chat.html — set them in chat settings.
+    // ---------------------------------------------------------------
+    const BACKEND_URL_KEY = "rbtl-relay-url-v1";
+    const SECRET_KEY = "rbtl-relay-secret-v1";
 
-    const fallbackPhotos = [
-      {
-        id:"m1",
-        src:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80",
-        caption:"soft afternoon outside",
-        date:"today",
-        album:"Home",
-        tags:["home","sky"],
-        author:"RBTL",
-        notes:["a tiny quiet moment saved here."]
-      },
-      {
-        id:"m2",
-        src:"https://images.unsplash.com/photo-1495567720989-cebdbdd97913?auto=format&fit=crop&w=900&q=80",
-        caption:"sunlight on the table",
-        date:"yesterday",
-        album:"Daily",
-        tags:["light","table"],
-        author:"RBTL",
-        notes:["looks like a page from a scrapbook."]
-      },
-      {
-        id:"m3",
-        src:"https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=900&q=80",
-        caption:"blue day memory",
-        date:"summer",
-        album:"Travel",
-        tags:["blue","sea"],
-        author:"RBTL",
-        notes:["keep this color for later."]
-      },
-      {
-        id:"m4",
-        src:"https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=900&q=80",
-        caption:"night with little stars",
-        date:"night",
-        album:"Night",
-        tags:["night","stars"],
-        author:"RBTL",
-        notes:["maybe this belongs to the night mode."]
-      },
-      {
-        id:"m5",
-        src:"https://images.unsplash.com/photo-1490750967868-88aa4486c946?auto=format&fit=crop&w=900&q=80",
-        caption:"flowers from somewhere",
-        date:"spring",
-        album:"Doodles",
-        tags:["flower","warm"],
-        author:"RBTL",
-        notes:["tiny flower doodle energy."]
-      }
-    ];
+    let photos = [];
+    let currentList = [];
+    let previewFile = null;
+    let wallNotice = null;   // replaces the empty-wall copy when the relay can't be read
 
-    let photos = loadPhotos();
-    let currentList = [...photos];
-    let previewData = "";
-
-    function loadPhotos(){
-      try{
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-        if(Array.isArray(saved) && saved.length){
-          return [...saved, ...fallbackPhotos];
-        }
-      }catch(err){}
-      return [...fallbackPhotos];
+    function relayUrl(){
+      try{ return localStorage.getItem(BACKEND_URL_KEY) || ""; }catch(err){ return ""; }
     }
 
-    function saveLocalPhoto(photo){
-      let saved = [];
+    function relaySecret(){
+      try{ return localStorage.getItem(SECRET_KEY) || ""; }catch(err){ return ""; }
+    }
+
+    function apiBase(){
+      const configured = relayUrl();
+      if(configured) return configured.replace(/\/+$/, "");
+      const host = location.hostname;
+      if(host === "localhost" || host === "127.0.0.1") return location.protocol + "//" + host + ":3011";
+      return "/relay";
+    }
+
+    function authHeaders(){
+      return { "Authorization": "Bearer " + relaySecret() };
+    }
+
+    function imgUrl(path){
+      if(!path) return "";
+      const base = apiBase();
+      const full = path.indexOf(base + "/") === 0 ? path : base + path;
+      return full + (full.indexOf("?") === -1 ? "?" : "&") + "token=" + encodeURIComponent(relaySecret());
+    }
+
+    function fromRelay(p){
+      return {
+        id: p.id,
+        src: imgUrl(p.img),
+        caption: p.caption || "untitled little memory",
+        date: p.time || "",
+        album: p.group || "Daily",
+        views: p.views || 0
+      };
+    }
+
+    async function pullPhotos(){
+      if(!relaySecret()){
+        showWallMessage("No connection key", 'open <a href="chat.html">chat settings</a> and paste your relay key.');
+        return;
+      }
+
       try{
-        saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      }catch(err){}
-      saved.unshift(photo);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        const r = await fetch(apiBase() + "/app/album/list", { headers: authHeaders() });
+        if(r.status === 401){
+          showWallMessage("Key rejected", 'the relay refused that key — check it in <a href="chat.html">chat settings</a>.');
+          return;
+        }
+        if(!r.ok) throw new Error("list " + r.status);
+
+        const data = await r.json();
+        wallNotice = null;
+        photos = (data.photos || []).map(fromRelay);
+        renderAll(photos);
+      }catch(err){
+        showWallMessage("Can't reach the relay", escapeHtml(apiBase()) + " didn't answer.");
+      }
+    }
+
+    function showWallMessage(title, html){
+      wallNotice = { title: title, html: html };
+      photos = [];
+      renderAll([]);
     }
 
     function iconSearch(){
@@ -1476,10 +1485,11 @@
       `;
 
       if(!list.length){
+        const notice = wallNotice || { title:"No memories yet", html:"upload one little photo first." };
         wall.innerHTML += `
           <div class="empty">
-            <div class="en">No memories yet</div>
-            <p>upload one little photo first.</p>
+            <div class="en">${escapeHtml(notice.title)}</div>
+            <p>${notice.html}</p>
           </div>
         `;
         return;
@@ -1600,7 +1610,7 @@
       });
     }
 
-    function openDetail(id){
+    async function openDetail(id){
       const photo = photos.find((p) => p.id === id);
       if(!photo) return;
 
@@ -1608,9 +1618,19 @@
       $("detailView").classList.remove("hidden");
       $("topLabel").innerHTML = "PHOTO<br>NOTE<span class='rule'></span>";
 
-      const notes = Array.isArray(photo.notes) && photo.notes.length
-        ? photo.notes
-        : ["a little memory saved here."];
+      // The list endpoint omits notes, and opening a photo is what counts as
+      // a view — so the detail endpoint is the one that has both.
+      let notes = [];
+      try{
+        const r = await fetch(apiBase() + "/app/album/photo/" + encodeURIComponent(id), { headers: authHeaders() });
+        if(r.ok){
+          const detail = await r.json();
+          notes = Array.isArray(detail.notes_list) ? detail.notes_list : [];
+          photo.views = detail.views || photo.views;
+        }
+      }catch(err){ /* the photo still renders without its notes */ }
+
+      if(!notes.length) notes = [{ at:"", text:"a little memory saved here." }];
 
       $("detailView").innerHTML = `
         <img class="photo" src="${photo.src}" alt="${escapeHtml(photo.caption)}" id="detailPhoto">
@@ -1618,7 +1638,7 @@
         <div class="author">
           <div class="av">♡</div>
           <div class="nm">
-            <b>${escapeHtml(photo.author || "RBTL")} <small>owner</small></b>
+            <b>RBTL <small>owner</small></b>
             <span>${escapeHtml(photo.date || "memory")}</span>
           </div>
         </div>
@@ -1626,17 +1646,17 @@
         <h1>${escapeHtml(photo.caption)}</h1>
 
         <div class="tags">
-          ${(photo.tags || []).map(tag => `<span class="tag">#${escapeHtml(tag)}</span>`).join("")}
+          <span class="tag">#${escapeHtml(photo.album || "Daily")}</span>
         </div>
 
-        <div class="views">${escapeHtml(photo.album || "Daily")} · pinned memory</div>
+        <div class="views">${photo.views} view${photo.views === 1 ? "" : "s"} · pinned memory</div>
 
         <div class="notes">
           <div class="nh">LITTLE NOTES</div>
           ${notes.map(note => `
             <div class="note">
-              <div class="at">RBTL note</div>
-              <div class="tx">${escapeHtml(note)}</div>
+              <div class="at">${escapeHtml(note.at || "RBTL note")}</div>
+              <div class="tx">${escapeHtml(note.text != null ? note.text : note)}</div>
             </div>
           `).join("")}
         </div>
@@ -1686,10 +1706,10 @@
     function clearUploadForm(){
       $("fileInput").value = "";
       $("captionInput").value = "";
-      $("tagInput").value = "";
+      $("albumInput").value = "";
       $("preview").src = "";
       $("preview").classList.add("hidden");
-      previewData = "";
+      previewFile = null;
       $("uploadStatus").textContent = "";
     }
 
@@ -1702,43 +1722,52 @@
         return;
       }
 
+      previewFile = file;   // the upload sends the raw file; this is only the preview
       const reader = new FileReader();
       reader.onload = () => {
-        previewData = reader.result;
-        $("preview").src = previewData;
+        $("preview").src = reader.result;
         $("preview").classList.remove("hidden");
       };
       reader.readAsDataURL(file);
     }
 
-    function saveUpload(){
-      if(!previewData){
+    async function saveUpload(){
+      if(!previewFile){
         $("uploadStatus").textContent = "choose a photo first.";
         return;
       }
+      if(!relaySecret()){
+        $("uploadStatus").textContent = "add your relay key in chat settings first.";
+        return;
+      }
 
-      const caption = $("captionInput").value.trim() || "untitled little memory";
-      const rawTags = $("tagInput").value.trim();
-      const tags = rawTags
-        ? rawTags.split(",").map(tag => tag.trim()).filter(Boolean)
-        : ["memory"];
+      const params = new URLSearchParams({
+        name: previewFile.name || "photo.jpg",
+        caption: $("captionInput").value.trim(),
+        group: $("albumInput").value.trim()
+      });
 
-      const photo = {
-        id:"local-" + Date.now(),
-        src:previewData,
-        caption,
-        date:"just now",
-        album:"Uploaded",
-        tags,
-        author:"RBTL",
-        notes:["newly pinned to the scrapbook."]
-      };
+      $("uploadStatus").textContent = "uploading…";
+      $("saveUpload").disabled = true;
 
-      saveLocalPhoto(photo);
-      photos.unshift(photo);
-      renderAll(photos);
-      closeUpload();
-      window.scrollTo({top:0, behavior:"smooth"});
+      try{
+        const r = await fetch(apiBase() + "/app/album/upload?" + params.toString(), {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": previewFile.type }, authHeaders()),
+          body: previewFile
+        });
+        if(r.status === 413) throw new Error("that photo is too large for the relay");
+        if(r.status === 401) throw new Error("the relay refused your key");
+        if(!r.ok) throw new Error("upload " + r.status);
+
+        await pullPhotos();
+        closeUpload();
+        window.scrollTo({top:0, behavior:"smooth"});
+      }catch(err){
+        $("uploadStatus").textContent = err.message;
+      }finally{
+        $("saveUpload").disabled = false;
+      }
     }
 
     function handleSearch(){
@@ -1750,14 +1779,7 @@
       }
 
       const filtered = photos.filter((photo) => {
-        const hay = [
-          photo.caption,
-          photo.date,
-          photo.album,
-          photo.author,
-          ...(photo.tags || [])
-        ].join(" ").toLowerCase();
-
+        const hay = [photo.caption, photo.date, photo.album].join(" ").toLowerCase();
         return hay.includes(q);
       });
 
@@ -1828,6 +1850,7 @@
     });
 
     renderAll(photos);
+    pullPhotos();
   </script>
 </body>
 </html>
