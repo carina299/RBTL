@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>RBTL · Chat</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#232041">
+  <link rel="icon" href="favicon.png" sizes="64x64" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="RBTL">
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Share+Tech&family=Patrick+Hand&family=Caveat:wght@600;700&display=swap');
@@ -1324,6 +1332,14 @@
         <div class="switch" id="notifySwitch"></div>
       </div>
 
+      <div class="toggle-row">
+        <div>
+          <span class="tl">Lock-screen push</span>
+          <span class="ts" id="pushHint">reach me when the app is closed</span>
+        </div>
+        <div class="switch" id="pushSwitch"></div>
+      </div>
+
       <h4>Backend connection</h4>
       <div class="backend-status" id="backendStatus">
         <span class="dot"></span>
@@ -1333,8 +1349,8 @@
       <label for="backendUrlInput">Relay URL</label>
       <input type="text" id="backendUrlInput" placeholder="leave blank to auto-detect" />
       <p class="backend-hint">
-        Blank auto-detects: <code>localhost:3011</code> when running locally, same-origin
-        <code>/relay</code> behind nginx. Set it only when the relay is on another origin.
+        Blank uses same-origin <code>/relay</code>, which the nginx in front of this page
+        proxies. Set it only when the relay is on another origin.
       </p>
 
       <label for="secretInput">Connection key</label>
@@ -1573,10 +1589,12 @@
       let authProbeInFlight = false;
       const seenIds = new Set();          // relay message ids already rendered
 
+      // Same-origin by default: the nginx in front of this page also proxies
+      // /relay/ to the relay, so the page and the API always share a host and
+      // no CORS is involved. Set Relay URL explicitly only for a split-origin
+      // deploy (this on Vercel, the relay on Render).
       function apiBase(){
         if (backendUrl) return backendUrl.replace(/\/+$/, "");
-        const host = location.hostname;
-        if (host === "localhost" || host === "127.0.0.1") return location.protocol + "//" + host + ":3011";
         return "/relay";
       }
 
@@ -1938,11 +1956,126 @@
         el.style.height = Math.min(el.scrollHeight, 96) + "px";
       }
 
+      /* ---------- lock-screen push ---------- */
+
+      // Service workers and push need a secure context: https, or localhost.
+      // Over a plain http:// LAN address (a phone hitting this machine's IP)
+      // `navigator.serviceWorker` simply isn't there.
+      const pushSupported = ("serviceWorker" in navigator) && ("PushManager" in window) && ("Notification" in window);
+
+      function isStandalone(){
+        return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+      }
+
+      function urlBase64ToUint8Array(base64){
+        const padded = (base64 + "=".repeat((4 - base64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+        const raw = atob(padded);
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+        return out;
+      }
+
+      function registerServiceWorker(){
+        if (!("serviceWorker" in navigator)) return;
+        navigator.serviceWorker.register("sw.js").catch(function(error){
+          console.warn("[RBTL] service worker registration failed:", error);
+        });
+      }
+
+      async function currentPushSubscription(){
+        if (!pushSupported) return null;
+        const reg = await navigator.serviceWorker.getRegistration();
+        return reg ? reg.pushManager.getSubscription() : null;
+      }
+
+      async function refreshPushUI(){
+        const hint = $("pushHint");
+        const sw = $("pushSwitch");
+
+        if (!pushSupported){
+          sw.classList.remove("on");
+          hint.textContent = location.protocol === "https:" || location.hostname === "localhost"
+            ? "this browser can't do push"
+            : "needs https — a plain http address can't register a service worker";
+          return;
+        }
+
+        const sub = await currentPushSubscription();
+        sw.classList.toggle("on", !!sub);
+
+        if (sub) hint.textContent = "on — the relay can reach your lock screen";
+        else if (Notification.permission === "denied") hint.textContent = "blocked in browser settings";
+        else if (/iPad|iPhone|iPod/.test(navigator.userAgent) && !isStandalone()) hint.textContent = "on iPhone: Add to Home Screen first, then turn this on";
+        else hint.textContent = "reach me when the app is closed";
+      }
+
+      async function enablePush(){
+        if (!secret){
+          showToast("add your connection key first");
+          return;
+        }
+        if (Notification.permission !== "granted"){
+          const granted = await Notification.requestPermission();
+          if (granted !== "granted"){
+            showToast("notifications not allowed");
+            return refreshPushUI();
+          }
+        }
+
+        const r = await fetch(apiBase() + "/app/vapid_public", { headers: authHeaders() });
+        if (!r.ok) throw new Error("vapid " + r.status);
+        const key = (await r.json()).key;
+        if (!key) throw new Error("the relay has no VAPID key configured");
+
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(key)
+        });
+
+        const saved = await fetch(apiBase() + "/app/subscribe", {
+          method: "POST",
+          headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+          body: JSON.stringify(sub.toJSON())
+        });
+        if (!saved.ok) throw new Error("subscribe " + saved.status);
+        showToast("lock-screen push on");
+      }
+
+      async function disablePush(){
+        const sub = await currentPushSubscription();
+        if (!sub) return;
+        // Tell the relay first: once unsubscribe() runs we no longer have the
+        // endpoint to delete, and it would linger as a dead row until its next
+        // 404/410 prune.
+        try{
+          await fetch(apiBase() + "/app/unsubscribe", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+            body: JSON.stringify({ endpoint: sub.endpoint })
+          });
+        }catch(error){ /* still unsubscribe locally */ }
+        await sub.unsubscribe();
+        showToast("lock-screen push off");
+      }
+
+      async function togglePush(){
+        if (!pushSupported) return;
+        try{
+          const sub = await currentPushSubscription();
+          if (sub) await disablePush(); else await enablePush();
+        }catch(error){
+          showToast("push: " + error.message);
+        }
+        refreshPushUI();
+      }
+
       /* ---------- chat settings sheet ---------- */
 
       function openChatSettings(){
         applyTheme();
         $("notifySwitch").classList.toggle("on", notifyOn);
+        refreshPushUI();
         refreshBackendStatus();
 
         $("chatSettingsModal").classList.remove("hidden");
@@ -2120,9 +2253,14 @@
 
       applyTheme();
       refreshContactUI();
-      renderMessages();   // paints the cached copy; openStream() reconciles with the relay
+      renderMessages();   // paints the cached copy, then the relay replaces it
+      // History does not depend on the stream: where SSE is blocked (some
+      // proxies buffer it away entirely) the conversation should still load and
+      // be sendable, just without live updates.
+      if (secret) pullHistory().catch(function(){ /* the cached copy stays on screen */ });
       openStream();
       startHeartbeat();
+      registerServiceWorker();
 
       $("backBtn").addEventListener("click", function(){
         window.location.href = "desktop.html";
@@ -2151,6 +2289,8 @@
           applyTheme();
         });
       });
+
+      $("pushSwitch").addEventListener("click", togglePush);
 
       $("notifySwitch").addEventListener("click", function(){
         notifyOn = !notifyOn;

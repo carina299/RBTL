@@ -127,6 +127,7 @@ services:
     container_name: rbtl_web
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx-web.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
       - "8080:80"
     depends_on:

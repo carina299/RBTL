@@ -41,16 +41,33 @@ services:
       - key: RELAY_PUBLIC_PREFIX
         value: ""   # no nginx in front on Render — must stay empty, see backend/.env.example
       - key: RELAY_APP_PATH
-        value: https://your-project.vercel.app/   # <- replace after deploying the frontend (where a push tap should open)
+        value: https://your-project.vercel.app/chat.html   # <- replace after deploying the frontend (where a push tap should open)
       - key: RELAY_ALLOW_ORIGINS
         value: https://your-project.vercel.app   # <- replace after deploying the frontend
       - key: RELAY_MAX_UPLOAD_BYTES
         value: "10485760"
       - key: RELAY_VOICE_MAX_BYTES
         value: "8388608"
-    # Uploaded files (images/voice) live on local disk and are EPHEMERAL on Render's
-    # free plan — they vanish on every redeploy/restart. Uncomment on a paid plan
-    # that supports persistent disks if you need uploads to survive:
+      - key: STORAGE_BACKEND
+        value: local   # no MinIO in this blueprint; album files go to the container's own disk
+      # Lock-screen push. Generate one keypair and keep it — changing it
+      # invalidates every existing subscription on every device. `sync: false`
+      # means "set this in the Render dashboard", so the private key never
+      # lands in the repo.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_PEM
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+    # Everything the relay writes to disk lives under /data, which is EPHEMERAL on
+    # Render's free plan — it vanishes on every redeploy/restart. That means:
+    #   - uploaded images/voice files disappear
+    #   - album photos disappear (STORAGE_BACKEND=local writes there too)
+    #   - relay.db disappears, and with it every **push subscription** — each
+    #     device has to re-enable lock-screen push after a redeploy
+    # Messages themselves are safe: those live in the managed Postgres above.
+    # Uncomment on a paid plan that supports persistent disks:
     # disk:
     #   name: rbtl-data
     #   mountPath: /data
