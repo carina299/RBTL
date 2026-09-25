@@ -20,7 +20,7 @@
   };
 
   const APPS = [
-    { id:"chat", name:"Chat", dock:true },
+    { id:"chat", name:"Chat", dock:true, media:{ img:"icons/chat-icon.png", hoverGif:"icons/chat-icon.gif" } },
     { id:"memories", name:"Memories", dock:true },
     { id:"shop", name:"Shop", dock:true },
     { id:"settings", name:"Settings", dock:true },
@@ -209,11 +209,36 @@
       btn.style.transform = "rotate(" + dockRot[i] + "deg)";
       btn.dataset.id = app.id;
 
-      btn.innerHTML =
-        '<span class="tile">' +
-          '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[app.id] + '</svg>' +
-        '</span>' +
-        '<span class="label">' + app.name + '</span>';
+      const tileHtml = app.media
+        ? '<span class="tile media-tile">' +
+            '<img class="tile-img tile-img-static" src="' + app.media.img + '" alt="" draggable="false">' +
+            '<img class="tile-img tile-img-hover" alt="" draggable="false">' +
+          '</span>'
+        : '<span class="tile">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true">' + ICONS[app.id] + '</svg>' +
+          '</span>';
+
+      btn.innerHTML = tileHtml + '<span class="label">' + app.name + '</span>';
+
+      if (app.media){
+        const hoverImg = btn.querySelector(".tile-img-hover");
+
+        // Only load the gif while actually hovered/focused, and clear the src on
+        // the way out — that's what makes it replay from frame one every time
+        // instead of looping silently in the background the whole time.
+        const playHoverGif = function(){
+          hoverImg.src = app.media.hoverGif;
+        };
+
+        const stopHoverGif = function(){
+          hoverImg.removeAttribute("src");
+        };
+
+        btn.addEventListener("pointerenter", playHoverGif);
+        btn.addEventListener("pointerleave", stopHoverGif);
+        btn.addEventListener("focus", playHoverGif);
+        btn.addEventListener("blur", stopHoverGif);
+      }
 
       btn.addEventListener("click", function(){
         if (app.id === "memories") {

@@ -756,3 +756,79 @@ body.day .heart-line{
     transition-duration:.15s !important;
   }
 }
+
+
+/* 允许图片放大时超出图标范围 */
+.dock .dock-btn .media-tile {
+  position: relative;
+  overflow: visible !important;
+  z-index: 1;
+}
+
+/* 普通图片和悬停图片重叠在同一位置 */
+.dock .dock-btn .tile-img,
+.dock .dock-btn .tile-img-hover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  transition:
+    transform 0.3s var(--ease),
+    opacity 0.12s var(--ease);
+}
+
+/* 默认只显示普通图片 */
+.dock .dock-btn .tile-img {
+  opacity: 1;
+}
+
+/* 默认隐藏悬停图片 */
+.dock .dock-btn .tile-img-hover {
+  opacity: 0;
+}
+
+/* 鼠标悬停时隐藏普通图片 */
+.dock .dock-btn:hover .tile-img,
+.dock .dock-btn:focus-visible .tile-img {
+  opacity: 0;
+}
+
+/* 鼠标悬停时显示悬停图片 */
+.dock .dock-btn:hover .tile-img-hover,
+.dock .dock-btn:focus-visible .tile-img-hover {
+  opacity: 1;
+  transform: scale(2) !important;
+}
+
+/* 悬停时图标整体上移，并提高层级 */
+.dock .dock-btn:hover,
+.dock .dock-btn:focus-visible {
+  position: relative;
+  z-index: 20;
+}
+
+/* 保留原本的 Dock 上浮效果 */
+.dock .dock-btn:hover .tile {
+  transform: translateY(-5px);
+}
+
+/* 手机端触摸时显示并放大悬停图片 */
+@media (max-width: 640px) {
+  .dock .dock-btn:active .tile-img {
+    opacity: 0;
+  }
+
+  .dock .dock-btn:active .tile-img-hover,
+  .dock .dock-btn:focus .tile-img-hover {
+    opacity: 1;
+    transform: scale(2) !important;
+  }
+
+  .dock .dock-btn:active,
+  .dock .dock-btn:focus {
+    position: relative;
+    z-index: 20;
+  }
+}

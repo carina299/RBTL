@@ -492,6 +492,39 @@
       color:#2d6ee0;
     }
 
+    .msg-image{
+      display:block;
+      max-width:min(220px, 52vw);
+      width:100%;
+      border-radius:14px;
+      margin-bottom:4px;
+    }
+
+    .msg-image-caption{
+      margin-top:2px;
+    }
+
+    .msg-reaction{
+      position:absolute;
+      right:-6px;
+      bottom:-10px;
+      width:22px;
+      height:22px;
+      border-radius:50%;
+      background:var(--paper);
+      border:2px solid var(--ink);
+      display:grid;
+      place-items:center;
+      font-size:12px;
+      box-shadow:1px 2px 0 rgba(0,0,0,.15);
+      animation:popIn .25s var(--ease) both;
+    }
+
+    .msg-row.them .msg-reaction{
+      right:auto;
+      left:-6px;
+    }
+
     .typing-dots{
       display:inline-flex;
       gap:4px;
