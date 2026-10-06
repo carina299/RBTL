@@ -348,3 +348,50 @@ class AlbumEntry(Base):
         nullable=False,
         server_default=func.now()
     )
+
+class ProactiveSend(Base):
+    """One attempt at reaching out first, recorded whether or not it landed.
+
+    The budget only counts rows with `delivered` true: a nudge broadcast while
+    no AI side was connected is dropped and never retried, so charging it
+    against the cooldown would quietly eat the day's allowance. The failed rows
+    are kept anyway — "it has been trying, nobody was home" is exactly what you
+    want to see when the answer to "why has it never messaged me" is neither
+    the schedule nor the gate.
+
+    `source` is which kind of outreach asked; they all share one budget, so
+    adding another kind can never multiply how often the human is interrupted.
+    """
+
+    __tablename__ = "proactive_sends"
+
+    __table_args__ = (
+        Index("idx_proactive_user_sent_at", "user_id", "sent_at"),
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        nullable=False
+    )
+
+    source: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False
+    )
+
+    delivered: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=sql_text("false")
+    )
+
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now()
+    )

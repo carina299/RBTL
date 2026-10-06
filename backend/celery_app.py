@@ -17,6 +17,10 @@ from celery.schedules import crontab
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# Matches the daytime check interval; tasks.py skips the ticks that are too
+# early for the current hour's pace.
+PROACTIVE_TICK_SECONDS = 60 * int(os.environ.get("PROACTIVE_DAY_CHECK_MINUTES", "10") or 10)
+
 celery_app = Celery("rbtl_memory", broker=REDIS_URL, backend=REDIS_URL, include=["tasks"])
 
 celery_app.conf.update(
@@ -29,6 +33,14 @@ celery_app.conf.update(
         "memory-reweight-daily": {
             "task": "memory.reweight",
             "schedule": crontab(hour=3, minute=0),  # low-traffic hour, UTC
+        },
+        # Fires at the daytime pace and lets the task itself hold back at night —
+        # a beat entry's schedule is fixed at import, while the cadence this
+        # wants depends on the local hour. The task is a no-op unless
+        # PROACTIVE_ENABLED is set.
+        "proactive-tick": {
+            "task": "proactive.tick",
+            "schedule": PROACTIVE_TICK_SECONDS,
         },
     },
 )
