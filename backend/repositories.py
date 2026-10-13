@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from models import AlbumEntry, Attachment, Memory, Message
+from models import AlbumEntry, Attachment, Memory, Message, ProactiveSend
 
 # Single-user project: every row carries this until real auth exists.
 DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -78,6 +78,20 @@ class MessageRepository:
             .limit(limit)
         )
         return list(self.session.scalars(stmt))
+
+    def latest_human_at(self) -> datetime | None:
+        """When she last said something. Outreach measures silence from here
+        rather than from the newest message of any kind: an exchange normally
+        ends on the AI's reply, so the newest message is almost always the AI's
+        and would make "how long has she been quiet" read as zero forever.
+        """
+        stmt = (
+            select(Message.created_at)
+            .where(Message.from_role == "human")
+            .order_by(Message.id.desc())
+            .limit(1)
+        )
+        return self.session.scalars(stmt).first()
 
     def latest_non_thinking(self) -> Message | None:
         stmt = select(Message).where(Message.kind != "thinking").order_by(Message.id.desc()).limit(1)
@@ -508,3 +522,45 @@ class AlbumRepository:
         last = entries[-1]
         return _encode_album_cursor(last.taken_at or last.created_at, last.id)
 
+
+
+class ProactiveSendRepository:
+    """Reads and writes the record of the AI reaching out first.
+
+    Every query here filters on `delivered`: an attempt that never reached a
+    running AI side must not count against any budget, or a day spent with
+    Claude Code closed would silently exhaust the allowance.
+    """
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def record(self, user_id: str, source: str, delivered: bool) -> ProactiveSend:
+        row = ProactiveSend(user_id=user_id, source=source, delivered=delivered)
+        self.session.add(row)
+        self.session.flush()
+        return row
+
+    def last_delivered_at(self, user_id: str) -> datetime | None:
+        """When outreach last actually landed, across every source — they share
+        one cooldown so that adding a new kind cannot multiply interruptions.
+        """
+        stmt = (
+            select(ProactiveSend.sent_at)
+            .where(ProactiveSend.user_id == user_id, ProactiveSend.delivered.is_(True))
+            .order_by(ProactiveSend.sent_at.desc())
+            .limit(1)
+        )
+        return self.session.scalars(stmt).first()
+
+    def delivered_since(self, user_id: str, since: datetime) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ProactiveSend)
+            .where(
+                ProactiveSend.user_id == user_id,
+                ProactiveSend.delivered.is_(True),
+                ProactiveSend.sent_at >= since,
+            )
+        )
+        return int(self.session.scalar(stmt) or 0)

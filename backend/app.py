@@ -689,6 +689,38 @@ async def channel_out(request: Request):
     return {"id": msg["id"]}
 
 
+@app.post("/internal/nudge")
+async def internal_nudge(request: Request):
+    """Wake the AI without the human having said anything.
+
+    The frame carries no `id` on purpose: the channel plugin dedupes on it and
+    advances a persisted cursor with it, so an id-less frame always gets through
+    and never becomes a message in the human's history.
+
+    `delivered: false` means nothing was listening — a broadcast to an empty
+    subscriber set is dropped and never retried, so the caller must not count
+    that as a nudge spent.
+    """
+    check_auth(request)
+    body = await request.json()
+    content = (body.get("content") or "").strip()
+    if not content:
+        # The plugin drops frames with no content, so an empty one would look
+        # delivered while silently going nowhere.
+        raise HTTPException(status_code=400, detail="content required")
+
+    if not plugin_subs:
+        return {"delivered": False, "listeners": 0}
+
+    await broadcast(plugin_subs, {
+        "content": content,
+        "user": body.get("user") or "system",
+        "ts": now_iso(),
+        "attachments": [],
+    })
+    return {"delivered": True, "listeners": len(plugin_subs)}
+
+
 # ---- human side ------------------------------------------------------------
 
 @app.post("/app/send")

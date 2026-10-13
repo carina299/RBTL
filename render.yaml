@@ -37,13 +37,19 @@ services:
       - key: RELAY_AI_NAME
         value: Claude
       - key: RELAY_HUMAN_NAME
-        value: Your Name
+        sync: false
       - key: RELAY_PUBLIC_PREFIX
         value: ""   # no nginx in front on Render — must stay empty, see backend/.env.example
+      # Both are your frontend's real URL, so they're set in the Render dashboard
+      # rather than committed here: a `value:` in this file is authoritative and
+      # gets re-applied on every blueprint sync, which would silently revert a
+      # dashboard edit the next time you push. `sync: false` leaves them alone.
+      #   RELAY_APP_PATH      = https://<your-frontend>/chat.html  (where a push tap opens)
+      #   RELAY_ALLOW_ORIGINS = https://<your-frontend>            (or CORS blocks everything)
       - key: RELAY_APP_PATH
-        value: https://your-project.vercel.app/chat.html   # <- replace after deploying the frontend (where a push tap should open)
+        sync: false
       - key: RELAY_ALLOW_ORIGINS
-        value: https://your-project.vercel.app   # <- replace after deploying the frontend
+        sync: false
       - key: RELAY_MAX_UPLOAD_BYTES
         value: "10485760"
       - key: RELAY_VOICE_MAX_BYTES

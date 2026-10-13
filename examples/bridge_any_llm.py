@@ -302,14 +302,37 @@ def stream_inbound(cursor: int) -> None:
                             m = json.loads(payload)
                         except json.JSONDecodeError:
                             continue
-                        if m.get("type") == "ping" or "id" not in m:
+                        if m.get("type") == "ping":
                             continue
+
+                        # Proactive nudge: no id by design, so do not advance the message cursor.
+                        if "id" not in m:
+                            content = (m.get("content") or "").strip()
+                            if not content:
+                                continue
+
+                            log("in", f"proactive nudge: {content[:60]}")
+                            try:
+                                # Keep the nudge temporary; do not store it as a human chat message.
+                                reply = call_llm(
+                                    build_messages() + [{"role": "user", "content": content}]
+                                )
+                            except Exception as e:
+                                log("err", f"proactive generation failed: {e}")
+                                continue
+
+                            if reply:
+                                convo.append({"role": "assistant", "content": reply})
+                                send_reply(reply)
+                            continue
+
+                        # Ordinary human message: preserve existing cursor and deduplication logic.
                         mid = int(m.get("id") or 0)
-                        if mid <= cursor:                 # already handled in the resend, skip
+                        if mid <= cursor:
                             continue
                         handle_human_message(m)
                         cursor = mid
-                        write_cursor(cursor)              # advance the cursor only after handling
+                        write_cursor(cursor)
             log("in", "stream ended → reconnect")
         except Exception as e:
             log("in", f"disconnected ({e}) → retry in {backoff}s")
